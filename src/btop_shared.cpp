@@ -89,6 +89,14 @@ namespace Gpu {
 		{"gpu-pwr-total", {}},
 	};
 	long long gpu_pwr_total_max = 0;
+	
+	namespace Nvml {
+		bool shutdown() { return true; }
+	}
+	
+	namespace Rsmi {
+		bool shutdown() { return true; }
+	}
 }
 #endif
 

@@ -1,0 +1,21 @@
+make: *** No rule to make target 'obj/igt_perf.c.o', needed by 'bottop'.  Stop.
+make: *** Waiting for unfinished jobs....
+ 
+ [38;5;196m██████[38;5;240m╗ [38;5;196m████████[38;5;240m╗ [38;5;196m██████[38;5;240m╗ [38;5;196m██████[38;5;240m╗
+ [38;5;160m██[38;5;239m╔══[38;5;160m██[38;5;239m╗╚══[38;5;160m██[38;5;239m╔══╝[38;5;160m██[38;5;239m╔═══[38;5;160m██[38;5;239m╗[38;5;160m██[38;5;239m╔══[38;5;160m██[38;5;239m╗   [38;5;160m██[38;5;239m╗    [38;5;160m██[38;5;239m╗
+ [38;5;124m██████[38;5;238m╔╝   [38;5;124m██[38;5;238m║   [38;5;124m██[38;5;238m║   [38;5;124m██[38;5;238m║[38;5;124m██████[38;5;238m╔╝ [38;5;124m██████[38;5;238m╗[38;5;124m██████[38;5;238m╗
+ [38;5;88m██[38;5;237m╔══[38;5;88m██[38;5;237m╗   [38;5;88m██[38;5;237m║   [38;5;88m██[38;5;237m║   [38;5;88m██[38;5;237m║[38;5;88m██[38;5;237m╔═══╝  ╚═[38;5;88m██[38;5;237m╔═╝╚═[38;5;88m██[38;5;237m╔═╝
+ [38;5;52m██████[38;5;236m╔╝   [38;5;52m██[38;5;236m║   ╚[38;5;52m██████[38;5;236m╔╝[38;5;52m██[38;5;236m║        ╚═╝    ╚═╝
+ [38;5;235m╚═════╝    ╚═╝    ╚═════╝ ╚═╝      [1;3;38;5;240mMakefile v1.6[0m
+[1;92mPLATFORM     [1;93m?| [0mLinux
+[1;96mARCH         [1;93m?| [0mx86_64
+[1;95mGPU_SUPPORT  [1;94m:| [0mtrue
+[1;93mCXX          [1;93m?| [0mg++ [1;93m([97m15.2.1[93m)
+[1;93mCC           [1;93m?| [0mcc [1;93m([97m21.1.6[93m)
+[1;94mTHREADS      [1;94m:| [0m12
+[1;92mREQFLAGS     [1;91m!| [0m-std=c++23
+[1;91mWARNFLAGS    [1;94m:| [0m-Wall -Wextra -pedantic
+[1;94mOPTFLAGS     [1;94m:| [0m-O2 
+[1;93mLDCXXFLAGS   [1;94m:| [0m-pthread -DFMT_HEADER_ONLY -D_GLIBCXX_ASSERTIONS -D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_DEBUG -D_FILE_OFFSET_BITS=64 -fexceptions -fstack-clash-protection -fcf-protection -fstack-protector -DGPU_SUPPORT -DAZEROTHCORE_SUPPORT 
+[1;95mCXXFLAGS     [1;92m+| [0;37m$([92mREQFLAGS[37m) $([93mLDCXXFLAGS[37m) $([94mOPTFLAGS[37m) $([91mWARNFLAGS[37m) 
+[1;95mLDFLAGS      [1;92m+| [0;37m$([93mLDCXXFLAGS[37m) $([94mOPTFLAGS[37m) $([91mWARNFLAGS[37m) 

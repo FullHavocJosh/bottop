@@ -28,7 +28,7 @@ tab-size = 4
 using std::string;
 using std::vector;
 
-//* Functions and variables for reading and writing the btop config file
+//* Functions and variables for reading and writing the bottop config file
 namespace Config {
 
 	extern std::filesystem::path conf_dir;
@@ -47,6 +47,9 @@ namespace Config {
 		"cpu", "mem", "net", "proc"
 #ifdef GPU_SUPPORT
 		,"gpu0", "gpu1", "gpu2", "gpu3", "gpu4", "gpu5"
+#endif
+#ifdef AZEROTHCORE_SUPPORT
+		,"azerothcore"
 #endif
 		};
 	const vector<string> temp_scales = { "celsius", "fahrenheit", "kelvin", "rankine" };

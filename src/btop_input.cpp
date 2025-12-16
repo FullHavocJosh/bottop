@@ -21,6 +21,7 @@ tab-size = 4
 #include <vector>
 #include <thread>
 #include <mutex>
+#include <fstream>
 #include <fmt/format.h>
 #include <signal.h>
 #include <sys/select.h>
@@ -32,6 +33,9 @@ tab-size = 4
 #include "btop_shared.hpp"
 #include "btop_menu.hpp"
 #include "btop_draw.hpp"
+#ifdef AZEROTHCORE_SUPPORT
+#include "btop_azerothcore.hpp"
+#endif
 
 using namespace Tools;
 using namespace std::literals; // for operator""s
@@ -205,351 +209,330 @@ namespace Input {
 	}
 
 	void process(const std::string_view key) {
-		if (key.empty()) return;
-		try {
-			auto filtering = Config::getB("proc_filtering");
-			auto vim_keys = Config::getB("vim_keys");
-			auto help_key = (vim_keys ? "H" : "h");
-			auto kill_key = (vim_keys ? "K" : "k");
-			//? Global input actions
-			if (not filtering) {
-				bool keep_going = false;
-				if (key == "q") {
-					clean_quit(0);
-				}
-				else if (is_in(key, "escape", "m")) {
-					Menu::show(Menu::Menus::Main);
-					return;
-				}
-				else if (is_in(key, "f1", "?", help_key)) {
-					Menu::show(Menu::Menus::Help);
-					return;
-				}
-				else if (is_in(key, "f2", "o")) {
-					Menu::show(Menu::Menus::Options);
-					return;
-				}
-				else if (key.size() == 1 and isint(key)) {
-					auto intKey = std::atoi(key.data());
-				#ifdef GPU_SUPPORT
-					static const array<string, 10> boxes = {"gpu5", "cpu", "mem", "net", "proc", "gpu0", "gpu1", "gpu2", "gpu3", "gpu4"};
-					if ((intKey == 0 and Gpu::count < 5) or (intKey >= 5 and intKey - 4 > Gpu::count))
-						return;
-				#else
-				static const array<string, 10> boxes = {"", "cpu", "mem", "net", "proc"};
-					if (intKey == 0 or intKey > 4)
-						return;
-				#endif
-					atomic_wait(Runner::active);
-
-					if (not Config::toggle_box(boxes.at(intKey))) {
-						Menu::show(Menu::Menus::SizeError);
-						return;
-					}
-					Config::current_preset = -1;
-					Draw::calcSizes();
-					Runner::run("all", false, true);
-					return;
-				}
-				else if (is_in(key, "p", "P") and Config::preset_list.size() > 1) {
-					const auto old_preset = Config::current_preset;
-					if (key == "p") {
-						if (++Config::current_preset >= (int)Config::preset_list.size()) Config::current_preset = 0;
-					}
-					else {
-						if (--Config::current_preset < 0) Config::current_preset = Config::preset_list.size() - 1;
-					}
-					atomic_wait(Runner::active);
-					if (not Config::apply_preset(Config::preset_list.at(Config::current_preset))) {
-						Menu::show(Menu::Menus::SizeError);
-						Config::current_preset = old_preset;
-						return;
-					}
-					Draw::calcSizes();
-					Runner::run("all", false, true);
-					return;
-				} else if (is_in(key, "ctrl_r")) {
-					kill(getpid(), SIGUSR2);
-					return;
-				} else
-					keep_going = true;
-
-				if (not keep_going) return;
+	if (key.empty()) return;
+	try {
+		auto filtering = Config::getB("proc_filtering");
+		auto vim_keys = Config::getB("vim_keys");
+		// auto help_key = (vim_keys ? "H" : "h");  // Unused in bottop
+		// auto kill_key = (vim_keys ? "K" : "k");  // Unused after stock box removal
+		//? Global input actions
+		if (not filtering) {
+			bool keep_going = false;
+			if (key == "q") {
+				clean_quit(0);
 			}
+			else if (is_in(key, "escape", "m")) {
+				Menu::show(Menu::Menus::Main);
+				return;
+			}
+			// Disabled stock btop keybinds - only q, esc, and z are active
+			/*
+			else if (is_in(key, "f1", "?", help_key)) {
+				Menu::show(Menu::Menus::Help);
+				return;
+			}
+			else if (is_in(key, "f2", "o")) {
+				Menu::show(Menu::Menus::Options);
+				return;
+			}
+			else if (key.size() == 1 and isint(key)) {
+				auto intKey = std::atoi(key.data());
+			#ifdef GPU_SUPPORT
+				static const array<string, 10> boxes = {"gpu5", "cpu", "mem", "net", "proc", "gpu0", "gpu1", "gpu2", "gpu3", "gpu4"};
+				if ((intKey == 0 and Gpu::count < 5) or (intKey >= 5 and intKey - 4 > Gpu::count))
+					return;
+			#else
+			static const array<string, 10> boxes = {"", "cpu", "mem", "net", "proc"};
+				if (intKey == 0 or intKey > 4)
+					return;
+			#endif
+				atomic_wait(Runner::active);
 
-			//? Input actions for proc box
-			if (Proc::shown) {
-				bool keep_going = false;
-				bool no_update = true;
-				bool redraw = true;
-				if (filtering) {
-					if (key == "enter" or key == "down") {
-						Config::set("proc_filter", Proc::filter.text);
-						Config::set("proc_filtering", false);
-						old_filter.clear();
-						if(key == "down"){
-							Config::unlock();
-							Config::lock();
-							process("down");
+				if (not Config::toggle_box(boxes.at(intKey))) {
+					Menu::show(Menu::Menus::SizeError);
+					return;
+				}
+				Config::current_preset = -1;
+				Draw::calcSizes();
+				Runner::run("all", false, true);
+				return;
+			}
+			else if (is_in(key, "p", "P") and Config::preset_list.size() > 1) {
+				const auto old_preset = Config::current_preset;
+				if (key == "p") {
+					if (++Config::current_preset >= (int)Config::preset_list.size()) Config::current_preset = 0;
+				}
+				else {
+					if (--Config::current_preset < 0) Config::current_preset = Config::preset_list.size() - 1;
+				}
+				atomic_wait(Runner::active);
+				if (not Config::apply_preset(Config::preset_list.at(Config::current_preset))) {
+					Menu::show(Menu::Menus::SizeError);
+					Config::current_preset = old_preset;
+					return;
+				}
+				Draw::calcSizes();
+				Runner::run("all", false, true);
+				return;
+			} else if (is_in(key, "ctrl_r")) {
+				kill(getpid(), SIGUSR2);
+				return;
+			} else
+			*/
+			else
+				keep_going = true;
+
+			if (not keep_going) return;
+		}
+
+			#ifdef AZEROTHCORE_SUPPORT
+			//? Input actions for AzerothCore zone navigation - arrow keys always work
+			if (Draw::AzerothCore::shown and not filtering) {
+				if (key == "up" or (vim_keys and key == "k")) {
+					// Auto-activate zone navigation on first use
+					if (not Draw::AzerothCore::zone_selection_active) {
+						Draw::AzerothCore::zone_selection_active = true;
+						Draw::AzerothCore::selected_zone = 0;
+					}
+					if (Draw::AzerothCore::selected_zone > 0) {
+						Draw::AzerothCore::selected_zone--;
+						Draw::AzerothCore::redraw = true;
+					}
+					return;
+				}
+				else if (key == "down" or (vim_keys and key == "j")) {
+					// Auto-activate zone navigation on first use
+					if (not Draw::AzerothCore::zone_selection_active) {
+						Draw::AzerothCore::zone_selection_active = true;
+						Draw::AzerothCore::selected_zone = 0;
+					}
+					// Navigate through display list, not raw zones
+					if (Draw::AzerothCore::selected_zone < (int)Draw::AzerothCore::zone_display_list.size() - 1) {
+						Draw::AzerothCore::selected_zone++;
+						Draw::AzerothCore::redraw = true;
+					}
+					return;
+				}
+				else if (Draw::AzerothCore::zone_selection_active and (key == "left" or (vim_keys and key == "h"))) {
+					// Left arrow collapses current item
+					int idx = Draw::AzerothCore::selected_zone;
+					
+					// Check if selected item exists in display list
+					if (idx >= 0 and idx < (int)Draw::AzerothCore::zone_display_list.size()) {
+						const auto& item = Draw::AzerothCore::zone_display_list[idx];
+						
+						if (item.type == Draw::AzerothCore::DisplayItem::CONTINENT) {
+							// Collapse continent
+							if (Draw::AzerothCore::expanded_continents.contains(item.name)) {
+								Draw::AzerothCore::expanded_continents.erase(item.name);
+								Draw::AzerothCore::redraw = true;
+							}
+						}
+						else if (item.type == Draw::AzerothCore::DisplayItem::ZONE) {
+							// First try to collapse the zone if expanded
+							if (Draw::AzerothCore::expanded_zones.contains(item.zone_index)) {
+								Draw::AzerothCore::expanded_zones.erase(item.zone_index);
+								Draw::AzerothCore::redraw = true;
+							}
+							// Otherwise collapse the continent
+							else {
+								const auto& zone = AzerothCore::current_data.zones[item.zone_index];
+								if (Draw::AzerothCore::expanded_continents.contains(zone.continent)) {
+									Draw::AzerothCore::expanded_continents.erase(zone.continent);
+									Draw::AzerothCore::redraw = true;
+								}
+							}
+						}
+					}
+					return;
+				}
+				else if (Draw::AzerothCore::zone_selection_active and (key == "enter" or key == "right" or (vim_keys and key == "l") or key == "space")) {
+					// Right arrow/Enter/Space expands selected item
+					int idx = Draw::AzerothCore::selected_zone;
+					
+					// Bounds check
+					if (idx < 0 or idx >= (int)Draw::AzerothCore::zone_display_list.size()) {
+						return;
+					}
+					
+					const auto& item = Draw::AzerothCore::zone_display_list[idx];
+					
+					if (item.type == Draw::AzerothCore::DisplayItem::CONTINENT) {
+						// Expand continent
+						if (!Draw::AzerothCore::expanded_continents.contains(item.name)) {
+							Draw::AzerothCore::expanded_continents.insert(item.name);
+							Draw::AzerothCore::redraw = true;
+						}
+					}
+					else if (item.type == Draw::AzerothCore::DisplayItem::ZONE) {
+						const auto& zone = AzerothCore::current_data.zones[item.zone_index];
+						
+						// If continent is collapsed, expand it first
+						if (!Draw::AzerothCore::expanded_continents.contains(zone.continent)) {
+							Draw::AzerothCore::expanded_continents.insert(zone.continent);
+							Draw::AzerothCore::redraw = true;
 							return;
 						}
-					}
-					else if (key == "escape" or key == "mouse_click") {
-						Config::set("proc_filter", old_filter);
-						Config::set("proc_filtering", false);
-						old_filter.clear();
-					}
-					else if (Proc::filter.command(key)) {
-						if (Config::getS("proc_filter") != Proc::filter.text)
-							Config::set("proc_filter", Proc::filter.text);
-					}
-					else
-						return;
-				}
-				else if (key == "left" or (vim_keys and key == "h")) {
-					int cur_i = v_index(Proc::sort_vector, Config::getS("proc_sorting"));
-					if (--cur_i < 0)
-						cur_i = Proc::sort_vector.size() - 1;
-					Config::set("proc_sorting", Proc::sort_vector.at(cur_i));
-				}
-				else if (key == "right" or (vim_keys and key == "l")) {
-					int cur_i = v_index(Proc::sort_vector, Config::getS("proc_sorting"));
-					if (std::cmp_greater(++cur_i, Proc::sort_vector.size() - 1))
-						cur_i = 0;
-					Config::set("proc_sorting", Proc::sort_vector.at(cur_i));
-				}
-				else if (is_in(key, "f", "/")) {
-					Config::flip("proc_filtering");
-					Proc::filter = Draw::TextEdit{Config::getS("proc_filter")};
-					old_filter = Proc::filter.text;
-				}
-				else if (key == "e") {
-					Config::flip("proc_tree");
-					no_update = false;
-				}
-				else if (is_in(key, "F")) {
-					Config::flip("pause_proc_list");
-					redraw = true;
-				}
-				else if (key == "r")
-					Config::flip("proc_reversed");
-
-				else if (key == "c")
-					Config::flip("proc_per_core");
-
-				else if (key == "%")
-					Config::flip("proc_mem_bytes");
-
-				else if (key == "delete" and not Config::getS("proc_filter").empty())
-					Config::set("proc_filter", ""s);
-
-				else if (key.starts_with("mouse_")) {
-					redraw = false;
-					const auto& [col, line] = mouse_pos;
-					const int y = (Config::getB("show_detailed") ? Proc::y + 8 : Proc::y);
-					const int height = (Config::getB("show_detailed") ? Proc::height - 8 : Proc::height);
-					if (col >= Proc::x + 1 and col < Proc::x + Proc::width and line >= y + 1 and line < y + height - 1) {
-						if (key == "mouse_click") {
-							if (col < Proc::x + Proc::width - 2) {
-								const auto& current_selection = Config::getI("proc_selected");
-								if (current_selection == line - y - 1) {
-									redraw = true;
-									if (Config::getB("proc_tree")) {
-										const int x_pos = col - Proc::x;
-										const int offset = Config::getI("selected_depth") * 3;
-										if (x_pos > offset and x_pos < 4 + offset) {
-											process("space");
-											return;
-										}
-									}
-									process("enter");
-									return;
+						
+						// Continent is expanded, toggle zone expansion
+						if (Draw::AzerothCore::expanded_zones.contains(item.zone_index)) {
+							Draw::AzerothCore::expanded_zones.erase(item.zone_index);
+						} else {
+							// Load zone details if not already loaded
+							auto& mutable_zone = AzerothCore::current_data.zones[item.zone_index];
+							if (mutable_zone.details.empty() && AzerothCore::query) {
+								try {
+									mutable_zone.details = AzerothCore::query->fetch_zone_details(mutable_zone.zone_id);
+									Logger::debug("Loaded " + std::to_string(mutable_zone.details.size()) + 
+									              " location clusters for zone: " + mutable_zone.name);
+								} catch (const std::exception& e) {
+									Logger::error("Failed to fetch zone details: " + std::string(e.what()));
 								}
-								else if (current_selection == 0 or line - y - 1 == 0)
-									redraw = true;
-								Config::set("proc_selected", line - y - 1);
 							}
-							else if (line == y + 1) {
-								if (Proc::selection("page_up") == -1) return;
-							}
-							else if (line == y + height - 2) {
-								if (Proc::selection("page_down") == -1) return;
-							}
-							else if (Proc::selection("mousey" + to_string(line - y - 2)) == -1)
-								return;
+							Draw::AzerothCore::expanded_zones.insert(item.zone_index);
 						}
-						else
-							goto proc_mouse_scroll;
-					}
-					else if (key == "mouse_click" and Config::getI("proc_selected") > 0) {
-						Config::set("proc_selected", 0);
-						redraw = true;
-					}
-					else
-						keep_going = true;
+					Draw::AzerothCore::redraw = true;
 				}
-				else if (key == "enter") {
-					if (Config::getI("proc_selected") == 0 and not Config::getB("show_detailed")) {
-						return;
-					}
-					else if (Config::getI("proc_selected") > 0 and Config::getI("detailed_pid") != Config::getI("selected_pid")) {
-						Config::set("detailed_pid", Config::getI("selected_pid"));
-						Config::set("proc_last_selected", Config::getI("proc_selected"));
-						Config::set("proc_selected", 0);
-						Config::set("show_detailed", true);
-					}
-					else if (Config::getB("show_detailed")) {
-						if (Config::getI("proc_last_selected") > 0) Config::set("proc_selected", Config::getI("proc_last_selected"));
-						Config::set("proc_last_selected", 0);
-						Config::set("detailed_pid", 0);
-						Config::set("show_detailed", false);
-					}
+				return;
+			}
+			// Page Up/Down for faster scrolling
+			else if (key == "page_up") {
+				if (not Draw::AzerothCore::zone_selection_active) {
+					Draw::AzerothCore::zone_selection_active = true;
+					Draw::AzerothCore::selected_zone = 0;
 				}
-				else if (is_in(key, "+", "-", "space", "u") and Config::getB("proc_tree") and Config::getI("proc_selected") > 0) {
-					atomic_wait(Runner::active);
-					auto& pid = Config::getI("selected_pid");
-					if (key == "+" or key == "space") Proc::expand = pid;
-					if (key == "-" or key == "space") Proc::collapse = pid;
-					if (key == "u")	Proc::toggle_children = pid;
-					no_update = false;
+				// Move up by page size (10 items)
+				Draw::AzerothCore::selected_zone = std::max(0, Draw::AzerothCore::selected_zone - 10);
+				Draw::AzerothCore::redraw = true;
+				return;
+			}
+			else if (key == "page_down") {
+				if (not Draw::AzerothCore::zone_selection_active) {
+					Draw::AzerothCore::zone_selection_active = true;
+					Draw::AzerothCore::selected_zone = 0;
 				}
-				else if (is_in(key, "t", kill_key) and (Config::getB("show_detailed") or Config::getI("selected_pid") > 0)) {
-					atomic_wait(Runner::active);
-					if (Config::getB("show_detailed") and Config::getI("proc_selected") == 0 and Proc::detailed.status == "Dead") return;
-					Menu::show(Menu::Menus::SignalSend, (key == "t" ? SIGTERM : SIGKILL));
+				// Move down by page size (10 items)
+				int max_pos = (int)Draw::AzerothCore::zone_display_list.size() - 1;
+				Draw::AzerothCore::selected_zone = std::min(max_pos, Draw::AzerothCore::selected_zone + 10);
+				Draw::AzerothCore::redraw = true;
+				return;
+			}
+			// Home/End for jumping to start/end
+			else if (key == "home") {
+				if (not Draw::AzerothCore::zone_selection_active) {
+					Draw::AzerothCore::zone_selection_active = true;
+				}
+				Draw::AzerothCore::selected_zone = 0;
+				Draw::AzerothCore::redraw = true;
+				return;
+			}
+			else if (key == "end") {
+				if (not Draw::AzerothCore::zone_selection_active) {
+					Draw::AzerothCore::zone_selection_active = true;
+				}
+				Draw::AzerothCore::selected_zone = (int)Draw::AzerothCore::zone_display_list.size() - 1;
+				Draw::AzerothCore::redraw = true;
+				return;
+			}
+			// Sorting keyboard shortcuts (n=name, b=bots, m=min level, M=max level, a=alignment, r=reverse)
+			else if (key == "n") {
+				Draw::AzerothCore::zone_sort_column = Draw::AzerothCore::ZoneSortColumn::NAME;
+				Draw::AzerothCore::redraw = true;
+				return;
+			}
+			else if (key == "b") {
+				Draw::AzerothCore::zone_sort_column = Draw::AzerothCore::ZoneSortColumn::BOTS;
+				Draw::AzerothCore::redraw = true;
+				return;
+			}
+			else if (key == "m") {
+				Draw::AzerothCore::zone_sort_column = Draw::AzerothCore::ZoneSortColumn::MIN_LEVEL;
+				Draw::AzerothCore::redraw = true;
+				return;
+			}
+			else if (key == "M") {
+				Draw::AzerothCore::zone_sort_column = Draw::AzerothCore::ZoneSortColumn::MAX_LEVEL;
+				Draw::AzerothCore::redraw = true;
+				return;
+			}
+			else if (key == "a") {
+				Draw::AzerothCore::zone_sort_column = Draw::AzerothCore::ZoneSortColumn::ALIGNMENT;
+				Draw::AzerothCore::redraw = true;
+				return;
+			}
+			else if (key == "r") {
+				Draw::AzerothCore::zone_sort_reverse = !Draw::AzerothCore::zone_sort_reverse;
+				Draw::AzerothCore::redraw = true;
+				return;
+			}
+			else if (key == "f" and not Draw::AzerothCore::zone_filtering) {
+				// Activate filter mode
+				Draw::AzerothCore::zone_filtering = true;
+				Draw::AzerothCore::zone_filter.clear();
+				Draw::AzerothCore::redraw = true;
+				return;
+			}
+			else if (Draw::AzerothCore::zone_filtering) {
+				// Handle filter input
+				if (key == "escape" or key == "enter") {
+					// Exit filter mode
+					Draw::AzerothCore::zone_filtering = false;
+					Draw::AzerothCore::redraw = true;
 					return;
 				}
-				else if (key == "s" and (Config::getB("show_detailed") or Config::getI("selected_pid") > 0)) {
-					atomic_wait(Runner::active);
-					if (Config::getB("show_detailed") and Config::getI("proc_selected") == 0 and Proc::detailed.status == "Dead") return;
-					Menu::show(Menu::Menus::SignalChoose);
-					return;
-				}
-			    else if (key == "N" and (Config::getB("show_detailed") or Config::getI("selected_pid") > 0)) {
-					atomic_wait(Runner::active);
-				    if (Config::getB("show_detailed") and Config::getI("proc_selected") == 0 and Proc::detailed.status == "Dead") return;
-				    Menu::show(Menu::Menus::Renice);
-				    return;
-			    }
-				else if (is_in(key, "up", "down", "page_up", "page_down", "home", "end") or (vim_keys and is_in(key, "j", "k", "g", "G"))) {
-					proc_mouse_scroll:
-					redraw = false;
-					auto old_selected = Config::getI("proc_selected");
-					auto new_selected = Proc::selection(key);
-					if (new_selected == -1)
-						return;
-					else if (old_selected != new_selected and (old_selected == 0 or new_selected == 0))
-						redraw = true;
-				}
-				else keep_going = true;
-
-				if (not keep_going) {
-					Runner::run("proc", no_update, redraw);
+				else if (Draw::AzerothCore::zone_filter.command(key)) {
+					// Filter text was modified
+					Draw::AzerothCore::redraw = true;
 					return;
 				}
 			}
+		}
+#endif
 
-			//? Input actions for cpu box
-			if (Cpu::shown) {
+	// Disable all other stock btop input handlers - bottop only uses q, esc, and z
+	return;
+			
+		#ifdef AZEROTHCORE_SUPPORT
+			//? Input actions for AzerothCore box
+			if (Draw::AzerothCore::shown) {
+				using namespace Draw::AzerothCore;
 				bool keep_going = false;
 				bool no_update = true;
 				bool redraw = true;
-				static uint64_t last_press = 0;
-
-				if (key == "+" and Config::getI("update_ms") <= 86399900) {
-					int add = (Config::getI("update_ms") <= 86399000 and last_press >= time_ms() - 200
-						and rng::all_of(Input::history, [](const auto& str){ return str == "+"; })
-						? 1000 : 100);
-					Config::set("update_ms", Config::getI("update_ms") + add);
-					last_press = time_ms();
-					redraw = true;
-				}
-				else if (key == "-" and Config::getI("update_ms") >= 200) {
-					int sub = (Config::getI("update_ms") >= 2000 and last_press >= time_ms() - 200
-						and rng::all_of(Input::history, [](const auto& str){ return str == "-"; })
-						? 1000 : 100);
-					Config::set("update_ms", Config::getI("update_ms") - sub);
-					last_press = time_ms();
-					redraw = true;
-				}
-				else keep_going = true;
-
-				if (not keep_going) {
-					Runner::run("cpu", no_update, redraw);
-					return;
-				}
-			}
-
-			//? Input actions for mem box
-			if (Mem::shown) {
-				bool keep_going = false;
-				bool no_update = true;
-				bool redraw = true;
-
-				if (key == "i") {
-					Config::flip("io_mode");
-				}
-				else if (key == "d") {
-					Config::flip("show_disks");
-					no_update = false;
-					Draw::calcSizes();
-				}
-				else keep_going = true;
-
-				if (not keep_going) {
-					Runner::run("mem", no_update, redraw);
-					return;
-				}
-			}
-
-			//? Input actions for net box
-			if (Net::shown) {
-				bool keep_going = false;
-				bool no_update = true;
-				bool redraw = true;
-
-				if (is_in(key, "b", "n")) {
-					atomic_wait(Runner::active);
-					int c_index = v_index(Net::interfaces, Net::selected_iface);
-					if (c_index != (int)Net::interfaces.size()) {
-						if (key == "b") {
-							if (--c_index < 0) c_index = Net::interfaces.size() - 1;
+				
+				if (is_in(key, "up", "down", "page_up", "page_down", "home", "end") or (vim_keys and is_in(key, "j", "k", "g", "G"))) {
+					const auto& zones = AzerothCore::current_data.zones;
+					size_t total_zones = zones.size();
+					
+					if (total_zones > zone_select_max) {
+						if (key == "up" or (vim_keys and key == "k")) {
+							if (zone_offset > 0) zone_offset--;
 						}
-						else if (key == "n") {
-							if (++c_index == (int)Net::interfaces.size()) c_index = 0;
+						else if (key == "down" or (vim_keys and key == "j")) {
+							if (zone_offset + zone_select_max < total_zones) zone_offset++;
 						}
-						Net::selected_iface = Net::interfaces.at(c_index);
-						Net::rescale = true;
+						else if (key == "page_up") {
+							zone_offset = (zone_offset > zone_select_max) ? zone_offset - zone_select_max : 0;
+						}
+						else if (key == "page_down") {
+							zone_offset = std::min(zone_offset + zone_select_max, total_zones - zone_select_max);
+						}
+						else if (key == "home" or (vim_keys and key == "g")) {
+							zone_offset = 0;
+						}
+						else if (key == "end" or (vim_keys and key == "G")) {
+							zone_offset = (total_zones > zone_select_max) ? total_zones - zone_select_max : 0;
+						}
 					}
-				}
-				else if (key == "y") {
-					Config::flip("net_sync");
-					Net::rescale = true;
-				}
-				else if (key == "a") {
-					Config::flip("net_auto");
-					Net::rescale = true;
-				}
-				else if (key == "z") {
-					atomic_wait(Runner::active);
-					auto& ndev = Net::current_net.at(Net::selected_iface);
-					if (ndev.stat.at("download").offset + ndev.stat.at("upload").offset > 0) {
-						ndev.stat.at("download").offset = 0;
-						ndev.stat.at("upload").offset = 0;
-					}
-					else {
-						ndev.stat.at("download").offset = ndev.stat.at("download").last + ndev.stat.at("download").rollover;
-						ndev.stat.at("upload").offset = ndev.stat.at("upload").last + ndev.stat.at("upload").rollover;
-					}
-					no_update = false;
 				}
 				else keep_going = true;
-
+				
 				if (not keep_going) {
-					Runner::run("net", no_update, redraw);
+					Runner::run("azerothcore", no_update, redraw);
 					return;
 				}
 			}
+		#endif
 		}
 
 		catch (const std::exception& e) {

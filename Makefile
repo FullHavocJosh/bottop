@@ -40,7 +40,7 @@ override PLATFORM_LC := $(shell echo $(PLATFORM) | tr '[:upper:]' '[:lower:]')
 ifeq ($(PLATFORM_LC)$(ARCH),linuxx86_64)
 	ifneq ($(STATIC),true)
 		GPU_SUPPORT := true
-		INTEL_GPU_SUPPORT := true
+		INTEL_GPU_SUPPORT := false
 	endif
 endif
 ifneq ($(GPU_SUPPORT),true)
@@ -49,6 +49,15 @@ endif
 
 ifeq ($(GPU_SUPPORT),true)
 	override ADDFLAGS += -DGPU_SUPPORT
+endif
+
+#? Check for AzerothCore support (libssh2)
+ifeq ($(shell pkg-config --exists libssh2 2>/dev/null; echo $$?),0)
+	AZEROTHCORE_SUPPORT := true
+	override ADDFLAGS += -DAZEROTHCORE_SUPPORT $(shell pkg-config --cflags libssh2)
+	override LDFLAGS += $(shell pkg-config --libs libssh2)
+else
+	AZEROTHCORE_SUPPORT := false
 endif
 
 #? Compiler and Linker
@@ -182,7 +191,8 @@ endif
 
 SOURCES	:= $(sort $(shell find $(SRCDIR) -maxdepth 1 -type f -name *.$(SRCEXT)))
 
-SOURCES += $(sort $(shell find $(SRCDIR)/$(PLATFORM_DIR) -maxdepth 1 -type f -name *.$(SRCEXT)))
+#? Don't include platform-specific system monitoring - we use stub-only for AzerothCore monitoring
+#SOURCES += $(sort $(shell find $(SRCDIR)/$(PLATFORM_DIR) -maxdepth 1 -type f -name *.$(SRCEXT)))
 
 OBJECTS	:= $(patsubst $(SRCDIR)/%,$(BUILDDIR)/%,$(SOURCES:.$(SRCEXT)=.$(OBJEXT)))
 
@@ -222,7 +232,7 @@ endif
 
 #? Default Make
 .ONESHELL:
-all: | info rocm_smi info-quiet directories btop.1 config.h btop
+all: | info rocm_smi info-quiet directories btop.1 config.h bottop
 
 ifneq ($(QUIET),true)
 info:
@@ -245,20 +255,20 @@ info:
 endif
 
 info-quiet: | info rocm_smi
-	@printf "\n\033[1;92mBuilding btop++ \033[91m(\033[97mv$(BTOP_VERSION)\033[91m) \033[93m$(PLATFORM) \033[96m$(ARCH)\033[0m\n"
+	@printf "\n\033[1;92mBuilding bottop \033[91m(\033[97mv$(BTOP_VERSION)\033[91m) \033[93m$(PLATFORM) \033[96m$(ARCH)\033[0m\n"
 
 help:
 	@printf " $(BANNER)\n"
-	@printf "\033[1;97mbtop++ makefile\033[0m\n"
+	@printf "\033[1;97mbottop makefile\033[0m\n"
 	@printf "usage: make [argument]\n\n"
 	@printf "arguments:\n"
-	@printf "  all          Compile btop (default argument)\n"
+	@printf "  all          Compile bottop (default argument)\n"
 	@printf "  clean        Remove built objects\n"
 	@printf "  distclean    Remove built objects and binaries\n"
-	@printf "  install      Install btop++ to \$$PREFIX ($(PREFIX))\n"
+	@printf "  install      Install bottop to \$$PREFIX ($(PREFIX))\n"
 	@printf "  setcap       Set extended capabilities on binary (preferable to setuid)\n"
 	@printf "  setuid       Set installed binary owner/group to \$$SU_USER/\$$SU_GROUP ($(SU_USER)/$(SU_GROUP)) and set SUID bit\n"
-	@printf "  uninstall    Uninstall btop++ from \$$PREFIX\n"
+	@printf "  uninstall    Uninstall bottop from \$$PREFIX\n"
 	@printf "  info         Display information about Environment,compiler and linker flags\n"
 
 #? Make the Directories
@@ -297,59 +307,59 @@ distclean: clean
 	@test -e lib/rocm_smi_lib/build && rm -rf lib/rocm_smi_lib/build || true
 
 install:
-	@printf "\033[1;92mInstalling binary to: \033[1;97m$(DESTDIR)$(PREFIX)/bin/btop\033[0m\n"
+	@printf "\033[1;92mInstalling binary to: \033[1;97m$(DESTDIR)$(PREFIX)/bin/bottop\033[0m\n"
 	@mkdir -p $(DESTDIR)$(PREFIX)/bin
-	@cp -p $(TARGETDIR)/btop $(DESTDIR)$(PREFIX)/bin/btop
-	@chmod 755 $(DESTDIR)$(PREFIX)/bin/btop
-	@printf "\033[1;92mInstalling doc to: \033[1;97m$(DESTDIR)$(PREFIX)/share/doc/btop\033[0m\n"
-	@mkdir -p $(DESTDIR)$(PREFIX)/share/doc/btop
-	@cp -p README.md $(DESTDIR)$(PREFIX)/share/doc/btop
-	@mkdir -p $(DESTDIR)$(PREFIX)/share/btop
-	@printf "\033[1;92mInstalling themes to: \033[1;97m$(DESTDIR)$(PREFIX)/share/btop/themes\033[0m\n"
-	@cp -pr themes $(DESTDIR)$(PREFIX)/share/btop
-	@printf "\033[1;92mInstalling desktop entry to: \033[1;97m$(DESTDIR)$(PREFIX)/share/applications/btop.desktop\033[0m\n"
+	@cp -p $(TARGETDIR)/bottop $(DESTDIR)$(PREFIX)/bin/bottop
+	@chmod 755 $(DESTDIR)$(PREFIX)/bin/bottop
+	@printf "\033[1;92mInstalling doc to: \033[1;97m$(DESTDIR)$(PREFIX)/share/doc/bottop\033[0m\n"
+	@mkdir -p $(DESTDIR)$(PREFIX)/share/doc/bottop
+	@cp -p README.md $(DESTDIR)$(PREFIX)/share/doc/bottop
+	@mkdir -p $(DESTDIR)$(PREFIX)/share/bottop
+	@printf "\033[1;92mInstalling themes to: \033[1;97m$(DESTDIR)$(PREFIX)/share/bottop/themes\033[0m\n"
+	@cp -pr themes $(DESTDIR)$(PREFIX)/share/bottop
+	@printf "\033[1;92mInstalling desktop entry to: \033[1;97m$(DESTDIR)$(PREFIX)/share/applications/bottop.desktop\033[0m\n"
 	@mkdir -p $(DESTDIR)$(PREFIX)/share/applications/
-	@cp -p btop.desktop $(DESTDIR)$(PREFIX)/share/applications/btop.desktop
-	@printf "\033[1;92mInstalling PNG icon to: \033[1;97m$(DESTDIR)$(PREFIX)/share/icons/hicolor/48x48/apps/btop.png\033[0m\n"
+	@cp -p btop.desktop $(DESTDIR)$(PREFIX)/share/applications/bottop.desktop
+	@printf "\033[1;92mInstalling PNG icon to: \033[1;97m$(DESTDIR)$(PREFIX)/share/icons/hicolor/48x48/apps/bottop.png\033[0m\n"
 	@mkdir -p $(DESTDIR)$(PREFIX)/share/icons/hicolor/48x48/apps
-	@cp -p Img/icon.png $(DESTDIR)$(PREFIX)/share/icons/hicolor/48x48/apps/btop.png
-	@printf "\033[1;92mInstalling SVG icon to: \033[1;97m$(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/btop.svg\033[0m\n"
+	@cp -p Img/icon.png $(DESTDIR)$(PREFIX)/share/icons/hicolor/48x48/apps/bottop.png
+	@printf "\033[1;92mInstalling SVG icon to: \033[1;97m$(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/bottop.svg\033[0m\n"
 	@mkdir -p $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps
-	@cp -p Img/icon.svg $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/btop.svg
+	@cp -p Img/icon.svg $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/bottop.svg
 ifneq ($(wildcard btop.1),)
-	@printf "\033[1;92mInstalling man page to: \033[1;97m$(DESTDIR)$(PREFIX)/share/man/man1/btop.1\033[0m\n"
+	@printf "\033[1;92mInstalling man page to: \033[1;97m$(DESTDIR)$(PREFIX)/share/man/man1/bottop.1\033[0m\n"
 	@mkdir -p $(DESTDIR)$(PREFIX)/share/man/man1
-	@cp -p btop.1 $(DESTDIR)$(PREFIX)/share/man/man1/btop.1
+	@cp -p btop.1 $(DESTDIR)$(PREFIX)/share/man/man1/bottop.1
 endif
 
-#? Set SUID bit for btop as $SU_USER in $SU_GROUP
+#? Set SUID bit for bottop as $SU_USER in $SU_GROUP
 setuid:
-	@printf "\033[1;97mFile: $(DESTDIR)$(PREFIX)/bin/btop\n"
+	@printf "\033[1;97mFile: $(DESTDIR)$(PREFIX)/bin/bottop\n"
 	@printf "\033[1;92mSetting owner \033[1;97m$(SU_USER):$(SU_GROUP)\033[0m\n"
-	@chown $(SU_USER):$(SU_GROUP) $(DESTDIR)$(PREFIX)/bin/btop
+	@chown $(SU_USER):$(SU_GROUP) $(DESTDIR)$(PREFIX)/bin/bottop
 	@printf "\033[1;92mSetting SUID bit\033[0m\n"
-	@chmod u+s $(DESTDIR)$(PREFIX)/bin/btop
+	@chmod u+s $(DESTDIR)$(PREFIX)/bin/bottop
 
-#? Run setcap on btop for extended capabilities
+#? Run setcap on bottop for extended capabilities
 setcap:
-	@printf "\033[1;97mFile: $(DESTDIR)$(PREFIX)/bin/btop\n"
+	@printf "\033[1;97mFile: $(DESTDIR)$(PREFIX)/bin/bottop\n"
 	@printf "\033[1;92mSetting capabilities...\033[0m\n"
-	@setcap "cap_perfmon=+ep cap_dac_read_search=+ep" $(DESTDIR)$(PREFIX)/bin/btop
+	@setcap "cap_perfmon=+ep cap_dac_read_search=+ep" $(DESTDIR)$(PREFIX)/bin/bottop
 
 # With 'rm -v' user will see what files (if any) got removed
 uninstall:
-	@printf "\033[1;91mRemoving: \033[1;97m$(DESTDIR)$(PREFIX)/bin/btop\033[0m\n"
-	@rm -rfv $(DESTDIR)$(PREFIX)/bin/btop
-	@printf "\033[1;91mRemoving: \033[1;97m$(DESTDIR)$(PREFIX)/share/btop\033[0m\n"
-	@rm -rfv $(DESTDIR)$(PREFIX)/share/btop
-	@printf "\033[1;91mRemoving: \033[1;97m$(DESTDIR)$(PREFIX)/share/applications/btop.desktop\033[0m\n"
-	@rm -rfv $(DESTDIR)$(PREFIX)/share/applications/btop.desktop
-	@printf "\033[1;91mRemoving: \033[1;97m$(DESTDIR)$(PREFIX)/share/icons/hicolor/48x48/apps/btop.png\033[0m\n"
-	@rm -rfv $(DESTDIR)$(PREFIX)/share/icons/hicolor/48x48/apps/btop.png
-	@printf "\033[1;91mRemoving: \033[1;97m$(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/btop.svg\033[0m\n"
-	@rm -rfv $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/btop.svg
-	@printf "\033[1;91mRemoving: \033[1;97m$(DESTDIR)$(PREFIX)/share/man/man1/btop.1\033[0m\n"
-	@rm -rfv $(DESTDIR)$(PREFIX)/share/man/man1/btop.1
+	@printf "\033[1;91mRemoving: \033[1;97m$(DESTDIR)$(PREFIX)/bin/bottop\033[0m\n"
+	@rm -rfv $(DESTDIR)$(PREFIX)/bin/bottop
+	@printf "\033[1;91mRemoving: \033[1;97m$(DESTDIR)$(PREFIX)/share/bottop\033[0m\n"
+	@rm -rfv $(DESTDIR)$(PREFIX)/share/bottop
+	@printf "\033[1;91mRemoving: \033[1;97m$(DESTDIR)$(PREFIX)/share/applications/bottop.desktop\033[0m\n"
+	@rm -rfv $(DESTDIR)$(PREFIX)/share/applications/bottop.desktop
+	@printf "\033[1;91mRemoving: \033[1;97m$(DESTDIR)$(PREFIX)/share/icons/hicolor/48x48/apps/bottop.png\033[0m\n"
+	@rm -rfv $(DESTDIR)$(PREFIX)/share/icons/hicolor/48x48/apps/bottop.png
+	@printf "\033[1;91mRemoving: \033[1;97m$(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/bottop.svg\033[0m\n"
+	@rm -rfv $(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/bottop.svg
+	@printf "\033[1;91mRemoving: \033[1;97m$(DESTDIR)$(PREFIX)/share/man/man1/bottop.1\033[0m\n"
+	@rm -rfv $(DESTDIR)$(PREFIX)/share/man/man1/bottop.1
 
 #? Pull in dependency info for *existing* .o files
 -include $(OBJECTS:.$(OBJEXT)=.$(DEPEXT))
@@ -382,13 +392,13 @@ endif
 
 #? Link
 .ONESHELL:
-btop: $(OBJECTS) | rocm_smi directories
+bottop: $(OBJECTS) | rocm_smi directories
 	@sleep 0.2 2>/dev/null || true
 	@TSTAMP=$$(date +%s 2>/dev/null || echo "0")
 	@$(QUIET) || printf "\n\033[1;92mLinking and optimizing binary\033[37m...\033[0m\n"
-	@$(VERBOSE) || printf "$(CXX) -o $(TARGETDIR)/btop $^ $(LDFLAGS)\n"
-	@$(CXX) -o $(TARGETDIR)/btop $^ $(LDFLAGS) || exit 1
-	@printf "\033[1;92m100$(P) -> \033[1;37m$(TARGETDIR)/btop \033[100D\033[38C\033[1;93m(\033[1;97m$$(du -ah $(TARGETDIR)/btop | cut -f1)iB\033[1;93m) \033[92m(\033[97m$$($(DATE_CMD) -d @$$(expr $$(date +%s 2>/dev/null || echo "0") - $${TSTAMP} 2>/dev/null) -u +%Mm:%Ss 2>/dev/null | sed 's/^00m://' || echo '')\033[92m)\033[0m\n"
+	@$(VERBOSE) || printf "$(CXX) -o $(TARGETDIR)/bottop $^ $(LDFLAGS)\n"
+	@$(CXX) -o $(TARGETDIR)/bottop $^ $(LDFLAGS) || exit 1
+	@printf "\033[1;92m100$(P) -> \033[1;37m$(TARGETDIR)/bottop \033[100D\033[38C\033[1;93m(\033[1;97m$$(du -ah $(TARGETDIR)/bottop | cut -f1)iB\033[1;93m) \033[92m(\033[97m$$($(DATE_CMD) -d @$$(expr $$(date +%s 2>/dev/null || echo "0") - $${TSTAMP} 2>/dev/null) -u +%Mm:%Ss 2>/dev/null | sed 's/^00m://' || echo '')\033[92m)\033[0m\n"
 	@printf "\n\033[1;92mBuild complete in \033[92m(\033[97m$$($(DATE_CMD) -d @$$(expr $$(date +%s 2>/dev/null || echo "0") - $(TIMESTAMP) 2>/dev/null) -u +%Mm:%Ss 2>/dev/null | sed 's/^00m://' || echo "unknown")\033[92m)\033[0m\n"
 
 #? Compile

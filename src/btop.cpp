@@ -63,6 +63,9 @@ tab-size = 4
 #include "btop_theme.hpp"
 #include "btop_draw.hpp"
 #include "btop_menu.hpp"
+#ifdef AZEROTHCORE_SUPPORT
+#include "btop_azerothcore.hpp"
+#endif
 #include "fmt/core.h"
 #include "fmt/ostream.h"
 
@@ -83,12 +86,12 @@ using namespace std::literals;
 
 namespace Global {
 	const vector<array<string, 2>> Banner_src = {
-		{"#E62525", "██████╗ ████████╗ ██████╗ ██████╗"},
-		{"#CD2121", "██╔══██╗╚══██╔══╝██╔═══██╗██╔══██╗   ██╗    ██╗"},
-		{"#B31D1D", "██████╔╝   ██║   ██║   ██║██████╔╝ ██████╗██████╗"},
-		{"#9A1919", "██╔══██╗   ██║   ██║   ██║██╔═══╝  ╚═██╔═╝╚═██╔═╝"},
-		{"#801414", "██████╔╝   ██║   ╚██████╔╝██║        ╚═╝    ╚═╝"},
-		{"#000000", "╚═════╝    ╚═╝    ╚═════╝ ╚═╝"},
+		{"#E62525", "██████╗  ██████╗ ████████╗████████╗ ██████╗ ██████╗"},
+		{"#CD2121", "██╔══██╗██╔═══██╗╚══██╔══╝╚══██╔══╝██╔═══██╗██╔══██╗"},
+		{"#B31D1D", "██████╔╝██║   ██║   ██║      ██║   ██║   ██║██████╔╝"},
+		{"#9A1919", "██╔══██╗██║   ██║   ██║      ██║   ██║   ██║██╔═══╝"},
+		{"#801414", "██████╔╝╚██████╔╝   ██║      ██║   ╚██████╔╝██║"},
+		{"#000000", "╚═════╝  ╚═════╝    ╚═╝      ╚═╝    ╚═════╝ ╚═╝"},
 	};
 	const string Version = "1.4.5";
 
@@ -134,8 +137,12 @@ void term_resize(bool force) {
 		if (force and refreshed) force = false;
 	}
 	else return;
-#ifdef GPU_SUPPORT
+#if defined(GPU_SUPPORT) && defined(AZEROTHCORE_SUPPORT)
+	static const array<string, 11> all_boxes = {"azerothcore", "gpu5", "cpu", "mem", "net", "proc", "gpu0", "gpu1", "gpu2", "gpu3", "gpu4"};
+#elif defined(GPU_SUPPORT)
 	static const array<string, 10> all_boxes = {"gpu5", "cpu", "mem", "net", "proc", "gpu0", "gpu1", "gpu2", "gpu3", "gpu4"};
+#elif defined(AZEROTHCORE_SUPPORT)
+	static const array<string, 6> all_boxes = {"azerothcore", "", "cpu", "mem", "net", "proc"};
 #else
 	static const array<string, 5> all_boxes = {"", "cpu", "mem", "net", "proc"};
 #endif
@@ -176,6 +183,14 @@ void term_resize(bool force) {
 				auto key = Input::get();
 				if (key == "q")
 					clean_quit(0);
+			#ifdef AZEROTHCORE_SUPPORT
+				else if (key == "a" or key == "0") {
+					// Toggle AzerothCore box (index 0)
+					Config::current_preset = -1;
+					Config::toggle_box("azerothcore");
+					boxes = Config::getS("shown_boxes");
+				}
+			#endif
 				else if (key.size() == 1 and isint(key)) {
 					auto intKey = stoi(key);
 				#ifdef GPU_SUPPORT
@@ -520,33 +535,24 @@ namespace Runner {
 
 			//* Run collection and draw functions for all boxes
 			try {
+				//? ========== STOCK BTOP BOXES DISABLED IN BOTTOP ==========
+				//? The following stock box collection/draw code is disabled for bottop.
+				//? All stock boxes (CPU/GPU/MEM/NET/PROC) have stubbed draw() functions
+				//? that return empty strings. Only AzerothCore monitoring is active.
+				//? This code remains for structural compatibility but does nothing.
+				
 			#ifdef GPU_SUPPORT
-				//? GPU data collection
-				const bool gpu_in_cpu_panel = Gpu::gpu_names.size() > 0 and (
-					Config::getS("cpu_graph_lower").starts_with("gpu-")
-					or (Config::getS("cpu_graph_lower") == "Auto")
-					or Config::getS("cpu_graph_upper").starts_with("gpu-")
-					or (Gpu::shown == 0 and Config::getS("show_gpu_info") != "Off")
-				);
-
+				//? GPU data collection (DISABLED - stubbed in btop_draw.cpp)
+				[[maybe_unused]] const bool gpu_in_cpu_panel = false; // Disabled in bottop
 				vector<unsigned int> gpu_panels = {};
-				for (auto& box : conf.boxes)
-					if (box.starts_with("gpu"))
-						gpu_panels.push_back(box.back()-'0');
-
 				vector<Gpu::gpu_info> gpus;
-				if (gpu_in_cpu_panel or not gpu_panels.empty()) {
-					if (Global::debug) debug_timer("gpu", collect_begin);
-					gpus = Gpu::collect(conf.no_update);
-					if (Global::debug) debug_timer("gpu", collect_done);
-				}
 				auto& gpus_ref = gpus;
 			#else
 				vector<Gpu::gpu_info> gpus_ref{};
 			#endif
 
-				//? CPU
-				if (v_contains(conf.boxes, "cpu")) {
+				//? CPU (DISABLED - draw() returns empty string)
+				if (false and v_contains(conf.boxes, "cpu")) {
 					try {
 						if (Global::debug) debug_timer("cpu", collect_begin);
 
@@ -573,8 +579,8 @@ namespace Runner {
 					}
 				}
 			#ifdef GPU_SUPPORT
-				//? GPU
-				if (not gpu_panels.empty() and not gpus_ref.empty()) {
+				//? GPU (DISABLED - panels set to empty above)
+				if (false and not gpu_panels.empty() and not gpus_ref.empty()) {
 					try {
 						if (Global::debug) debug_timer("gpu", draw_begin_only);
 
@@ -590,8 +596,8 @@ namespace Runner {
 					}
 				}
 			#endif
-				//? MEM
-				if (v_contains(conf.boxes, "mem")) {
+				//? MEM (DISABLED - draw() returns empty string)
+				if (false and v_contains(conf.boxes, "mem")) {
 					try {
 						if (Global::debug) debug_timer("mem", collect_begin);
 
@@ -610,8 +616,8 @@ namespace Runner {
 					}
 				}
 
-				//? NET
-				if (v_contains(conf.boxes, "net")) {
+				//? NET (DISABLED - draw() returns empty string)
+				if (false and v_contains(conf.boxes, "net")) {
 					try {
 						if (Global::debug) debug_timer("net", collect_begin);
 
@@ -630,8 +636,8 @@ namespace Runner {
 					}
 				}
 
-				//? PROC
-				if (v_contains(conf.boxes, "proc")) {
+				//? PROC (DISABLED - draw() returns empty string)
+				if (false and v_contains(conf.boxes, "proc")) {
 					try {
 						if (Global::debug) debug_timer("proc", collect_begin);
 
@@ -649,6 +655,47 @@ namespace Runner {
 						throw std::runtime_error("Proc:: -> " + string{e.what()});
 					}
 				}
+
+			#ifdef AZEROTHCORE_SUPPORT
+				//? AZEROTHCORE
+				if (Config::getB("azerothcore_enabled")) {
+					try {
+						if (Global::debug) debug_timer("azerothcore", collect_begin);
+
+						//? Start collect
+						try {
+							if (not conf.no_update) ::AzerothCore::collect();
+						}
+						catch (const std::exception& e) {
+							Logger::error("AzerothCore::collect() -> " + string{e.what()});
+							::AzerothCore::current_data.error = "Collect error: " + string{e.what()};
+						}
+
+						if (Global::debug) debug_timer("azerothcore", draw_begin);
+
+						//? Draw box
+						try {
+							if (not pause_output and Draw::AzerothCore::shown) {
+								Logger::debug("Calling AzerothCore::draw(), shown=" + std::to_string(Draw::AzerothCore::shown));
+								output += Draw::AzerothCore::draw(conf.force_redraw, conf.no_update);
+								Logger::debug("AzerothCore::draw() completed, output size=" + std::to_string(output.size()));
+							} else {
+								Logger::debug("NOT calling AzerothCore::draw(), pause=" + std::to_string(pause_output) + " shown=" + std::to_string(Draw::AzerothCore::shown));
+							}
+						}
+						catch (const std::exception& e) {
+							Logger::error("AzerothCore::draw() EXCEPTION -> " + string{e.what()});
+							// Don't crash, just skip drawing this iteration
+						}
+
+						if (Global::debug) debug_timer("azerothcore", draw_done);
+					}
+					catch (const std::exception& e) {
+						Logger::error("AzerothCore:: -> " + string{e.what()});
+						// Don't crash the whole application
+					}
+				}
+			#endif
 
 			}
 			catch (const std::exception& e) {
@@ -675,14 +722,15 @@ namespace Runner {
 					output += Term::clear;
 					empty_bg = fmt::format(
 						"{banner}"
-						"{mv1}{titleFg}{b}No boxes shown!"
-						"{mv2}{hiFg}1 {mainFg}| Show CPU box"
-						"{mv3}{hiFg}2 {mainFg}| Show MEM box"
-						"{mv4}{hiFg}3 {mainFg}| Show NET box"
-						"{mv5}{hiFg}4 {mainFg}| Show PROC box"
-						"{mv6}{hiFg}5-0 {mainFg}| Show GPU boxes"
-						"{mv7}{hiFg}esc {mainFg}| Show menu"
-						"{mv8}{hiFg}q {mainFg}| Quit",
+						"{mv1}{titleFg}{b}bottop - AzerothCore Monitor"
+					#ifdef AZEROTHCORE_SUPPORT
+						"{mv2}{hiFg}a {mainFg}| Show AZEROTHCORE box"
+						"{mv3}{hiFg}esc {mainFg}| Show menu"
+						"{mv4}{hiFg}q {mainFg}| Quit",
+					#else
+						"{mv2}{hiFg}esc {mainFg}| Show menu"
+						"{mv3}{hiFg}q {mainFg}| Quit",
+					#endif
 						"banner"_a = Draw::banner_gen(y, 0, true),
 						"titleFg"_a = Theme::c("title"), "b"_a = Fx::b, "hiFg"_a = Theme::c("hi_fg"), "mainFg"_a = Theme::c("main_fg"),
 						"mv1"_a = Mv::to(y+6, x),
@@ -877,7 +925,7 @@ static auto configure_tty_mode(std::optional<bool> force_tty) {
 			if (cli.config_file.has_value()) {
 				Config::conf_file = cli.config_file.value();
 			} else {
-				Config::conf_file = Config::conf_dir / "btop.conf";
+				Config::conf_file = Config::conf_dir / "bottop.conf";
 			}
 			Logger::logfile = Config::get_log_file();
 			Theme::user_theme_dir = Config::conf_dir / "themes";
@@ -918,12 +966,12 @@ static auto configure_tty_mode(std::optional<bool> force_tty) {
 	}
 #endif
 	if (std::error_code ec; not Global::self_path.empty()) {
-		Theme::theme_dir = fs::canonical(Global::self_path / "../share/btop/themes", ec);
+		Theme::theme_dir = fs::canonical(Global::self_path / "../share/bottop/themes", ec);
 		if (ec or not fs::is_directory(Theme::theme_dir) or access(Theme::theme_dir.c_str(), R_OK) == -1) Theme::theme_dir.clear();
 	}
 	//? If relative path failed, check two most common absolute paths
 	if (Theme::theme_dir.empty()) {
-		for (auto theme_path : {"/usr/local/share/btop/themes", "/usr/share/btop/themes"}) {
+		for (auto theme_path : {"/usr/local/share/bottop/themes", "/usr/share/bottop/themes"}) {
 			if (fs::is_directory(fs::path(theme_path)) and access(theme_path, R_OK) != -1) {
 				Theme::theme_dir = fs::path(theme_path);
 				break;
@@ -1010,7 +1058,7 @@ static auto configure_tty_mode(std::optional<bool> force_tty) {
 
 	//? Initialize terminal and set options
 	if (not Term::init()) {
-		Global::exit_error_msg = "No tty detected!\nbtop++ needs an interactive shell to run.";
+		Global::exit_error_msg = "No tty detected!\nbottop needs an interactive shell to run.";
 		clean_quit(1);
 	}
 
@@ -1042,9 +1090,36 @@ static auto configure_tty_mode(std::optional<bool> force_tty) {
 		clean_quit(1);
 	}
 
+#ifdef AZEROTHCORE_SUPPORT
+	//? Initialize AzerothCore monitoring if enabled
+	if (Config::getB("azerothcore_enabled")) {
+		::AzerothCore::config.ssh_host = Config::getS("azerothcore_ssh_host");
+		::AzerothCore::config.db_host = Config::getS("azerothcore_db_host");
+		::AzerothCore::config.db_user = Config::getS("azerothcore_db_user");
+		::AzerothCore::config.db_pass = Config::getS("azerothcore_db_pass");
+		::AzerothCore::config.db_name = Config::getS("azerothcore_db_name");
+		::AzerothCore::config.container = Config::getS("azerothcore_container");
+		::AzerothCore::config.config_path = Config::getS("azerothcore_config_path");
+		::AzerothCore::config.ra_username = Config::getS("azerothcore_ra_username");
+		::AzerothCore::config.ra_password = Config::getS("azerothcore_ra_password");
+		::AzerothCore::enabled = true;
+		try {
+			::AzerothCore::init();
+		}
+		catch (const std::exception& e) {
+			Logger::warning("AzerothCore::init() failed -> " + string{e.what()});
+		}
+	}
+#endif
+
 	if (not Config::set_boxes(Config::getS("shown_boxes"))) {
+	#ifdef AZEROTHCORE_SUPPORT
+		Config::set_boxes("azerothcore");
+		Config::set("shown_boxes", "azerothcore"s);
+	#else
 		Config::set_boxes("cpu mem net proc");
 		Config::set("shown_boxes", "cpu mem net proc"s);
+	#endif
 	}
 
 	//? Update list of available themes and generate the selected theme
@@ -1101,7 +1176,15 @@ static auto configure_tty_mode(std::optional<bool> force_tty) {
 
 	//? Print out box outlines
 	const bool term_sync = Config::getB("terminal_sync");
+	#ifdef AZEROTHCORE_SUPPORT
+	if (Draw::AzerothCore::shown) {
+		cout << (term_sync ? Term::sync_start : "") << Draw::AzerothCore::box << (term_sync ? Term::sync_end : "") << flush;
+	} else {
+		cout << (term_sync ? Term::sync_start : "") << Cpu::box << Mem::box << Net::box << Proc::box << (term_sync ? Term::sync_end : "") << flush;
+	}
+	#else
 	cout << (term_sync ? Term::sync_start : "") << Cpu::box << Mem::box << Net::box << Proc::box << (term_sync ? Term::sync_end : "") << flush;
+	#endif
 
 
 	//? ------------------------------------------------ MAIN LOOP ----------------------------------------------------

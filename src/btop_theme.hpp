@@ -59,12 +59,24 @@ namespace Theme {
 	extern std::unordered_map<string, array<string, 101>> gradients;
 
 	//* Return escape code for color <name>
-	inline const string& c(const string& name) { return colors.at(name); }
+	inline const string& c(const string& name) {
+		static const string empty_string = "";
+		auto it = colors.find(name);
+		return (it != colors.end()) ? it->second : empty_string;
+	}
 
 	//* Return array of escape codes for color gradient <name>
-	inline const array<string, 101>& g(const string& name) { return gradients.at(name); }
+	inline const array<string, 101>& g(const string& name) {
+		static const array<string, 101> empty_gradient = {};
+		auto it = gradients.find(name);
+		return (it != gradients.end()) ? it->second : empty_gradient;
+	}
 
 	//* Return array of red, green and blue in decimal for color <name>
-	inline const std::array<int, 3>& dec(const string& name) { return rgbs.at(name); }
+	inline const std::array<int, 3>& dec(const string& name) {
+		static const std::array<int, 3> empty_rgb = {0, 0, 0};
+		auto it = rgbs.find(name);
+		return (it != rgbs.end()) ? it->second : empty_rgb;
+	}
 
 }

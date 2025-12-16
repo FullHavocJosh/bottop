@@ -123,6 +123,9 @@ namespace Term {
         bool mem = boxes.find("mem") != string::npos;
         bool net = boxes.find("net") != string::npos;
         bool proc = boxes.find("proc") != string::npos;
+	#ifdef AZEROTHCORE_SUPPORT
+		bool azerothcore = boxes.find("azerothcore") != string::npos;
+	#endif
 	#ifdef GPU_SUPPORT
 		int gpu = 0;
         if (Gpu::count > 0)
@@ -134,6 +137,9 @@ namespace Term {
 		else if (net) width = Mem::min_width;
 		width += (proc ? Proc::min_width : 0);
 		if (cpu and width < Cpu::min_width) width = Cpu::min_width;
+	#ifdef AZEROTHCORE_SUPPORT
+		if (azerothcore and width < 80) width = 80;  // Minimum width for AzerothCore box
+	#endif
 	#ifdef GPU_SUPPORT
 		if (gpu != 0 and width < Gpu::min_width) width = Gpu::min_width;
 	#endif
@@ -141,10 +147,20 @@ namespace Term {
 		int height = (cpu ? Cpu::min_height : 0);
 		if (proc) height += Proc::min_height;
 		else height += (mem ? Mem::min_height : 0) + (net ? Net::min_height : 0);
+	#ifdef AZEROTHCORE_SUPPORT
+		if (azerothcore) height += 20;  // Minimum height for AzerothCore box
+	#endif
 	#ifdef GPU_SUPPORT
 		for (int i = 0; i < gpu; i++)
 			height += Gpu::gpu_b_height_offsets[i] + 4;
 	#endif
+
+		// DEBUG: Log what we're returning for azerothcore
+		#ifdef AZEROTHCORE_SUPPORT
+		if (azerothcore) {
+			Logger::debug("get_min_size for azerothcore: width=" + std::to_string(width) + " height=" + std::to_string(height));
+		}
+		#endif
 
 		return { width, height };
 	}
@@ -700,7 +716,7 @@ namespace Logger {
 				std::ofstream lwrite(log_file, std::ios::app);
 				if (first) {
 					first = false;
-					lwrite << "\n" << strf_time(tdf) << "===> btop++ v." << Global::Version << "\n";
+					lwrite << "\n" << strf_time(tdf) << "===> bottop v." << Global::Version << "\n";
 				}
 				lwrite << strf_time(tdf) << log_levels.at(level) << ": " << msg << "\n";
 			}

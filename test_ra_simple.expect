@@ -1,0 +1,30 @@
+#!/usr/bin/expect -f
+
+set timeout 30
+
+# Spawn docker attach
+spawn ssh -t root@testing-azerothcore.rollet.family "docker attach testing-ac-worldserver"
+
+# Wait for output, then send newline
+sleep 2
+send "\r"
+
+# Wait for AC> prompt
+expect "AC>"
+
+# Check if account exists
+send_user "\n=== Checking account info ===\n"
+send ".account havoc\r"
+expect "AC>"
+
+# Try to change password again
+send_user "\n=== Setting password ===\n"
+send ".account set password havoc ch405P1x3l ch405P1x3l\r"
+expect "AC>"
+
+# Detach
+send "\x10"
+sleep 0.1
+send "\x11"
+
+expect eof

@@ -27,9 +27,9 @@ static constexpr auto RESET = "\033[0m"sv;
 
 static void version() noexcept {
 	if constexpr (GIT_COMMIT.empty()) {
-		fmt::println("btop version: {}{}{}", BOLD, Global::Version, RESET);
+		fmt::println("bottop version: {}{}{}", BOLD, Global::Version, RESET);
 	} else {
-		fmt::println("btop version: {}{}+{}{}", BOLD, Global::Version, GIT_COMMIT, RESET);
+		fmt::println("bottop version: {}{}+{}{}", BOLD, Global::Version, GIT_COMMIT, RESET);
 	}
 }
 
@@ -188,7 +188,7 @@ namespace Cli {
 	}
 
 	void usage() noexcept {
-		fmt::println("{0}Usage:{1} {2}btop{1} [OPTIONS]\n", BOLD_UNDERLINE, RESET, BOLD);
+		fmt::println("{0}Usage:{1} {2}bottop{1} [OPTIONS]\n", BOLD_UNDERLINE, RESET, BOLD);
 	}
 
 	void help() noexcept {

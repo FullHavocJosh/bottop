@@ -19,7 +19,9 @@ tab-size = 4
 #pragma once
 
 #include <array>
+#include <chrono>
 #include <deque>
+#include <set>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -61,7 +63,7 @@ namespace Symbols {
 
 namespace Draw {
 
-	//* Generate if needed and return the btop++ banner
+	//* Generate if needed and return the bottop banner
 	string banner_gen(int y=0, int x=0, bool centered=false, bool redraw=false);
 
 	//* An editable text field
@@ -139,3 +141,65 @@ namespace Proc {
 	extern std::unordered_map<size_t, Draw::Graph> p_graphs;
 	extern std::unordered_map<size_t, int> p_counters;
 }
+
+#ifdef AZEROTHCORE_SUPPORT
+namespace Draw {
+	namespace AzerothCore {
+		extern int width_p, height_p;
+		extern int min_width, min_height;
+		extern int x, y, width, height;
+		extern bool shown, redraw;
+		extern string box;
+		
+		//* Three-pane layout (SERVER PERFORMANCE left, BOT DISTRIBUTION right, ZONES bottom)
+		extern int perf_width, perf_height;        // Left pane (server performance)
+		extern int perf_x, perf_y;
+		extern int dist_width, dist_height;        // Right pane (bot distribution)
+		extern int dist_x, dist_y;
+		extern int zones_height;                   // Bottom pane (zone list)
+		extern int zones_y;
+		extern string perf_box;                    // Performance box outline
+		extern string dist_box;                    // Distribution box outline
+		extern string zones_box;                   // Zones box outline
+		
+		//* Zone list scrolling and filtering
+		extern size_t zone_offset;
+		extern size_t zone_select_max;
+		extern Draw::TextEdit zone_filter;         // Filter for zones
+		
+		//* Display list for zone navigation
+		struct DisplayItem {
+			enum Type { CONTINENT, REGION, ZONE };
+			Type type;
+			size_t zone_index;  // Index in data.zones (only for ZONE type)
+			string name;
+		};
+		extern std::vector<DisplayItem> zone_display_list;
+		
+		//* Zone selection and expansion
+		extern int selected_zone;
+		extern bool zone_selection_active;
+		extern bool zone_filtering;                // Whether zone filter is active
+		extern std::set<size_t> expanded_zones;
+		extern std::set<std::string> expanded_continents;  // Track which continents are expanded
+		
+		//* Zone scrolling
+		extern int zone_scroll_offset;  // First visible line in zones list
+		
+		//* Zone sorting
+		enum class ZoneSortColumn { NONE, NAME, BOTS, MIN_LEVEL, MAX_LEVEL, ALIGNMENT };
+		extern ZoneSortColumn zone_sort_column;
+		extern bool zone_sort_reverse;
+		
+		//* Update intervals (tracked as time_t in cpp)
+		extern uint64_t last_perf_update;
+		extern uint64_t last_dist_update;
+		extern uint64_t last_zones_update;
+		
+		//* Graph tracking
+		extern long long last_graph_max;
+		
+		string draw(bool force_redraw = false, bool data_same = false);
+	}
+}
+#endif

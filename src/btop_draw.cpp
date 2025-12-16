@@ -25,6 +25,8 @@ tab-size = 4
 #include <string>
 #include <string_view>
 #include <utility>
+#include <set>
+#include <fstream>
 
 #include "btop_draw.hpp"
 #include "btop_config.hpp"
@@ -33,6 +35,9 @@ tab-size = 4
 #include "btop_tools.hpp"
 #include "btop_input.hpp"
 #include "btop_menu.hpp"
+#ifdef AZEROTHCORE_SUPPORT
+#include "btop_azerothcore.hpp"
+#endif
 #include <fmt/format.h>
 
 
@@ -515,6 +520,7 @@ namespace Draw {
 }
 
 namespace Cpu {
+	// Cpu namespace variables kept for calc_sizes() function
 	int width_p = 100, height_p = 32;
 	int min_width = 60, min_height = 8;
 	int x = 1, y = 1, width = 20, height;
@@ -525,7 +531,7 @@ namespace Cpu {
 	int graph_up_height, graph_low_height;
 	int graph_up_width, graph_low_width;
 	int gpu_meter_width;
-	bool shown = true, redraw = true, mid_line = false;
+	bool shown = false, redraw = false, mid_line = false;  // shown = false (disabled)
 	string box;
 	vector<Draw::Graph> graphs_upper;
 	vector<Draw::Graph> graphs_lower;
@@ -536,436 +542,11 @@ namespace Cpu {
 	vector<Draw::Graph> gpu_temp_graphs;
 	vector<Draw::Graph> gpu_mem_graphs;
 
-    string draw(const cpu_info& cpu, const vector<Gpu::gpu_info>& gpus, bool force_redraw, bool data_same) {
-		if (Runner::stopping) return "";
-		if (force_redraw) redraw = true;
-		bool show_temps = (Config::getB("check_temp") and got_sensors);
-		bool show_watts = (Config::getB("show_cpu_watts") and supports_watts);
-		auto single_graph = Config::getB("cpu_single_graph");
-		bool hide_cores = show_temps and (cpu_temp_only or not Config::getB("show_coretemp"));
-		const int extra_width = (hide_cores ? max(6, 6 * b_column_size) : (b_columns == 1 && !show_temps) ? 8 : 0);
-	#ifdef GPU_SUPPORT
-		const auto& show_gpu_info = Config::getS("show_gpu_info");
-		const bool gpu_always = show_gpu_info == "On";
-		const bool gpu_auto = show_gpu_info == "Auto";
-		const bool show_gpu = (gpus.size() > 0 and (gpu_always or (gpu_auto and Gpu::shown < Gpu::count)));
-	#else
-		(void)gpus;
-	#endif
-		auto graph_up_field = Config::getS("cpu_graph_upper");
-		if (graph_up_field == "Auto" or not v_contains(Cpu::available_fields, graph_up_field))
-			graph_up_field = "total";
-		auto graph_lo_field = Config::getS("cpu_graph_lower");
-		if (graph_lo_field == "Auto" or not v_contains(Cpu::available_fields, graph_lo_field)) {
-		#ifdef GPU_SUPPORT
-			graph_lo_field = show_gpu ? "gpu-totals" : graph_up_field;
-		#else
-			graph_lo_field = graph_up_field;
-		#endif
-		}
-		auto tty_mode = Config::getB("tty_mode");
-		auto& graph_symbol = (tty_mode ? "tty" : Config::getS("graph_symbol_cpu"));
-		auto& graph_bg = Symbols::graph_symbols.at((graph_symbol == "default" ? Config::getS("graph_symbol") + "_up" : graph_symbol + "_up")).at(6);
-		auto& temp_scale = Config::getS("temp_scale");
-		auto cpu_bottom = Config::getB("cpu_bottom");
-
-		const string& title_left = Theme::c("cpu_box") + (cpu_bottom ? Symbols::title_left_down : Symbols::title_left);
-		const string& title_right = Theme::c("cpu_box") + (cpu_bottom ? Symbols::title_right_down : Symbols::title_right);
-		static int bat_pos = 0, bat_len = 0;
-		if (safeVal(cpu.cpu_percent, "total"s).empty()
-			or safeVal(cpu.core_percent, 0).empty()
-			or (show_temps and safeVal(cpu.temp, 0).empty())) return "";
-		if (safeVal(cpu.cpu_percent, "total"s).empty()
-			or safeVal(cpu.core_percent, 0).empty()
-			or (show_temps and safeVal(cpu.temp, 0).empty())) return "";
-		string out;
-		out.reserve(width * height);
-
-		//* Redraw elements not needed to be updated every cycle
-		if (redraw) {
-			mid_line = (not single_graph and graph_up_field != graph_lo_field);
-			graph_up_height = (single_graph ? height - 2 : ceil((double)(height - 2) / 2) - (mid_line and height % 2 != 0));
-			graph_low_height = height - 2 - graph_up_height - mid_line;
-			const int button_y = cpu_bottom ? y + height - 1 : y;
-			out += box;
-
-			//? Buttons on title
-			out += Mv::to(button_y, x + 10) + title_left + Theme::c("hi_fg") + Fx::b + 'm' + Theme::c("title") + "enu" + Fx::ub + title_right;
-			Input::mouse_mappings["m"] = {button_y, x + 11, 1, 4};
-			out += Mv::to(button_y, x + 16) + title_left + Theme::c("hi_fg") + Fx::b + 'p' + Theme::c("title") + "reset "
-				+ (Config::current_preset < 0 ? "*" : to_string(Config::current_preset)) + Fx::ub + title_right;
-			Input::mouse_mappings["p"] = {button_y, x + 17, 1, 8};
-			const string update = to_string(Config::getI("update_ms")) + "ms";
-			out += Mv::to(button_y, x + width - update.size() - 8) + title_left + Fx::b + Theme::c("hi_fg") + "- " + Theme::c("title") + update
-				+ Theme::c("hi_fg") + " +" + Fx::ub + title_right;
-			Input::mouse_mappings["-"] = {button_y, x + width - (int)update.size() - 7, 1, 2};
-			Input::mouse_mappings["+"] = {button_y, x + width - 5, 1, 2};
-
-			// Draw container engine name
-			if (Cpu::container_engine.has_value()) {
-				fmt::format_to(std::back_inserter(out), "{}{}{}{}{}", Mv::to(button_y, x + 28), title_left, Theme::c("title"), Cpu::container_engine.value(), title_right);
-			}
-
-			//? Graphs & meters
-			const int graph_default_width = x + width - b_width - 3;
-
-			auto init_graphs = [&](vector<Draw::Graph>& graphs, const int graph_height, int& graph_width, const string& graph_field, bool invert) {
-			#ifdef GPU_SUPPORT
-				if (graph_field.starts_with("gpu")) {
-					if (graph_field.find("totals") != string::npos) {
-						graphs.resize(gpus.size());
-						gpu_temp_graphs.resize(gpus.size());
-						gpu_mem_graphs.resize(gpus.size());
-						gpu_meters.resize(gpus.size());
-						const int gpu_draw_count = gpu_always ? Gpu::count : Gpu::count - Gpu::shown;
-						graph_width = gpu_draw_count <= 0 ? graph_default_width : graph_default_width/gpu_draw_count - gpu_draw_count + 1 + graph_default_width%gpu_draw_count;
-						for (size_t i = 0; i < gpus.size(); i++) {
-							if (gpu_auto and v_contains(Gpu::shown_panels, i))
-								continue;
-							auto& gpu = gpus[i]; auto& graph = graphs[i];
-
-							//? GPU graphs
-							if (gpu.supported_functions.gpu_utilization) {
-								if (i + 1 < gpus.size()) {
-									graph = Draw::Graph{graph_width, graph_height, "cpu", safeVal(gpu.gpu_percent, graph_field), graph_symbol, invert, true};
-								}
-								else {
-									graph = Draw::Graph{
-										graph_width + graph_default_width%graph_width - (int)gpus.size() + 1,
-										graph_height, "cpu", safeVal(gpu.gpu_percent, graph_field), graph_symbol, invert, true
-									};
-								}
-							}
-						}
-					} else {
-						graphs.resize(1);
-						graph_width = graph_default_width;
-						graphs[0] = Draw::Graph{ graph_width, graph_height, "cpu", safeVal(Gpu::shared_gpu_percent, graph_field), graph_symbol, invert, true };
-					}
-				}
-				else {
-			#endif
-					graphs.resize(1);
-					graph_width = graph_default_width;
-					graphs[0] = Draw::Graph{ graph_width, graph_height, "cpu", safeVal(cpu.cpu_percent, graph_field), graph_symbol, invert, true };
-			#ifdef GPU_SUPPORT
-				}
-			#endif
-			};
-
-            init_graphs(graphs_upper, graph_up_height, graph_up_width, graph_up_field, false);
-            if (not single_graph)
-            	init_graphs(graphs_lower, graph_low_height, graph_low_width, graph_lo_field, Config::getB("cpu_invert_lower"));
-
-			#ifdef GPU_SUPPORT
-			if (show_gpu and b_columns > 1) {
-				gpu_temp_graphs.resize(gpus.size());
-				gpu_mem_graphs.resize(gpus.size());
-				gpu_meters.resize(gpus.size());
-	
-				// Shrink gpu graph width in small boxes to prevent line width extending past box border
-				auto gpu_graph_width = b_width < 42 ? 4 : 5;
-
-				for (size_t i = 0; i < gpus.size(); i++) {
-					if (gpu_auto and v_contains(Gpu::shown_panels, i))
-						continue;
-					auto& gpu = gpus[i];
-
-					//? GPU graphs/meters
-					auto width_left = b_width - 10 - (gpus.size() > 9 ? 2 : gpus.size() > 1 ? 1 : 0);
-					if (gpu.supported_functions.temp_info and show_temps) {
-						gpu_temp_graphs[i] = Draw::Graph{ gpu_graph_width, 1, "temp", gpu.temp, graph_symbol, false, false, gpu.temp_max, -23 };
-						width_left -= 11;
-					}
-					if (gpu.supported_functions.mem_used and gpu.supported_functions.mem_total and b_columns > 1) {
-						gpu_mem_graphs[i] = Draw::Graph{ gpu_graph_width, 1, "used", safeVal(gpu.gpu_percent, "gpu-vram-totals"s), graph_symbol };
-						width_left -= 5;
-					}
-					width_left -= (gpu.supported_functions.mem_used ? 5 : 0);
-					width_left -= (gpu.supported_functions.mem_total ? 6 : 0);
-					width_left -= (gpu.supported_functions.pwr_usage ? 6 : 0);
-					if (gpu.supported_functions.gpu_utilization) {
-						gpu_meters[i] = Draw::Meter{width_left, "cpu" };
-					}
-				}
-			}
-			#endif
-
-			int cpu_meter_width = b_width - (show_temps ? 23 - (b_column_size <= 1 and b_columns == 1 ? 6 : 0) : 11);
-			if (show_watts) {
-				cpu_meter_width -= 6;
-			}
-
-			cpu_meter = Draw::Meter{cpu_meter_width, "cpu"};
-
-			if (mid_line) {
-				out += Mv::to(y + graph_up_height + 1, x) + Fx::ub + Theme::c("cpu_box") + Symbols::div_left + Theme::c("div_line")
-					+ Symbols::h_line * (width - b_width - 2) + Symbols::div_right
-					+ Mv::to(y + graph_up_height + 1, x + ((width - b_width) / 2) - ((graph_up_field.size() + graph_lo_field.size()) / 2) - 4)
-					+ Theme::c("main_fg") + graph_up_field + Mv::r(1) + "▲▼" + Mv::r(1) + graph_lo_field;
-			}
-
-			if (b_column_size > 0 or extra_width > 0) {
-				core_graphs.clear();
-				for (const auto& core_data : cpu.core_percent) {
-					core_graphs.emplace_back(5 * b_column_size + extra_width, 1, "cpu", core_data, graph_symbol);
-				}
-			}
-
-			if (show_temps) {
-				temp_graphs.clear();
-				temp_graphs.emplace_back(5, 1, "temp", safeVal(cpu.temp, 0), graph_symbol, false, false, cpu.temp_max, -23);
-				if (not hide_cores and b_column_size > 1) {
-					for (const auto& i : iota((size_t)1, cpu.temp.size())) {
-						temp_graphs.emplace_back(5, 1, "temp", safeVal(cpu.temp, i), graph_symbol, false, false, cpu.temp_max, -23);
-					}
-				}
-			}
-		}
-
-		//? Draw battery if enabled and present
-		if (Config::getB("show_battery") and has_battery) {
-			static int old_percent{};   // defaults to = 0
-			static long old_seconds{};  // defaults to = 0
-			static float old_watts{};	// defaults to = 0
-			static string old_status;
-			static Draw::Meter bat_meter {10, "cpu", true};
-			static const std::unordered_map<string, string> bat_symbols = {
-				{"charging", "▲"},
-				{"discharging", "▼"},
-				{"full", "■"},
-				{"unknown", "○"}
-			};
-
-			const auto& [percent, watts, seconds, status] = current_bat;
-
-			if (redraw or percent != old_percent or (watts != old_watts and Config::getB("show_battery_watts")) or seconds != old_seconds or status != old_status) {
-				old_percent = percent;
-				old_watts = watts;
-				old_seconds = seconds;
-				old_status = status;
-				const string str_time = (seconds > 0 ? sec_to_dhms(seconds, false, true) : "");
-				const string str_percent = to_string(percent) + '%';
-				const string str_watts = (watts != -1 and Config::getB("show_battery_watts") ? fmt::format("{:.2f}", watts) + 'W' : "");
-				const auto& bat_symbol = bat_symbols.at((bat_symbols.contains(status) ? status : "unknown"));
-				const int current_len = (Term::width >= 100 ? 11 : 0) + str_time.size() + str_percent.size() + str_watts.size() + to_string(Config::getI("update_ms")).size();
-				const int current_pos = Term::width - current_len - 17;
-
-				if ((bat_pos != current_pos or bat_len != current_len) and bat_pos > 0 and not redraw)
-					out += Mv::to(y, bat_pos) + Fx::ub + Theme::c("cpu_box") + Symbols::h_line * (bat_len + 4);
-				bat_pos = current_pos;
-				bat_len = current_len;
-
-				out += Mv::to(y, bat_pos) + title_left + Theme::c("title") + Fx::b + "BAT" + bat_symbol + ' ' + str_percent
-					+ (Term::width >= 100 ? Fx::ub + ' ' + bat_meter(percent) + Fx::b : "")
-					+ (not str_time.empty() ? ' ' + Theme::c("title") + str_time : "") + (not str_watts.empty() ? " " + Theme::c("title") + Fx::b + str_watts : "") + Fx::ub + title_right;
-			}
-		}
-		else if (bat_pos > 0) {
-			out += Mv::to(y, bat_pos) + Fx::ub + Theme::c("cpu_box") + Symbols::h_line * (bat_len + 4);
-			bat_pos = bat_len = 0;
-		}
-
-		try {
-			//? Cpu/Gpu graphs
-			out += Fx::ub + Mv::to(y + 1, x + 1);
-			auto draw_graphs = [&](vector<Draw::Graph>& graphs, const int graph_height, const int graph_width, const string& graph_field) {
-			#ifdef GPU_SUPPORT
-				if (graph_field.starts_with("gpu"))
-					if (graph_field.ends_with("totals")) {
-						int gpu_drawn = 0;
-						for (size_t i = 0; i < gpus.size(); i++) {
-							if (gpu_auto and v_contains(Gpu::shown_panels, i)) {
-								continue;
-							}
-							try {
-								const auto& gpu_percent = gpus[i].gpu_percent;
-								out += graphs[i](safeVal(gpu_percent, graph_field), (data_same or redraw));
-							} catch (std::out_of_range& /* unused */) {
-								continue;
-							}
-							if (Gpu::count - (gpu_auto ? Gpu::shown : 0) > 1) {
-								auto i_str = to_string(i);
-								out += Mv::l(graph_width-1) + Mv::u(graph_height/2) + (graph_width > 5 ? "GPU" : "") + i_str
-									+ Mv::d(graph_height/2) + Mv::r(graph_width - 1 - (graph_width > 5)*3 - i_str.size());
-							}
-
-							if (++gpu_drawn < Gpu::count - (gpu_auto ? Gpu::shown : 0))
-								out += Theme::c("div_line") + (Symbols::v_line + Mv::l(1) + Mv::u(1))*graph_height + Mv::r(1) + Mv::d(1);
-						}
-					}
-					else
-						out += graphs[0](safeVal(Gpu::shared_gpu_percent, graph_field), (data_same or redraw));
-				else
-			#else
-				(void)graph_height;
-				(void)graph_width;
-			#endif
-					out += graphs[0](safeVal(cpu.cpu_percent, graph_field), (data_same or redraw));
-			};
-
-			draw_graphs(graphs_upper, graph_up_height, graph_up_width, graph_up_field);
-			if (not single_graph) {
-				out += Mv::to(y + graph_up_height + 1 + mid_line, x + 1);
-				draw_graphs(graphs_lower, graph_low_height, graph_low_width, graph_lo_field);
-			}
-
-			//? Uptime
-			if (Config::getB("show_uptime")) {
-				string upstr = sec_to_dhms(system_uptime());
-				if (upstr.size() > 8) {
-					upstr.resize(upstr.size() - 3);
-					upstr = trans(upstr);
-				}
-				out += Mv::to(y + (single_graph or not Config::getB("cpu_invert_lower") ? 1 : height - 2), x + 2)
-					+ Theme::c("graph_text") + "up" + Mv::r(1) + upstr;
-			}
-
-		#ifdef __linux__
-			const bool freq_range = Config::getS("freq_mode") == "range";
-		#else
-			const bool freq_range = false;
-		#endif
-
-			//? Cpu clock and cpu meter
-			if (Config::getB("show_cpu_freq") and not cpuHz.empty())
-				out += Mv::to(b_y, b_x + b_width - (freq_range ? 20 : 10)) + Fx::ub + Theme::c("div_line")
-					+ Symbols::h_line * ((freq_range ? 17 : 7) - cpuHz.size())
-					+ Symbols::title_left + Fx::b + Theme::c("title") + cpuHz + Fx::ub + Theme::c("div_line") + Symbols::title_right;
-
-		out += Mv::to(b_y + 1, b_x + 1) + Theme::c("main_fg") + Fx::b + "CPU " + cpu_meter(safeVal(cpu.cpu_percent, "total"s).back())
-			+ Theme::g("cpu").at(clamp(safeVal(cpu.cpu_percent, "total"s).back(), 0ll, 100ll)) + rjust(to_string(safeVal(cpu.cpu_percent, "total"s).back()), 4) + Theme::c("main_fg") + '%';
-		if (show_temps) {
-			const auto [temp, unit] = celsius_to(safeVal(cpu.temp, 0).back(), temp_scale);
-			const auto temp_color = Theme::g("temp").at(clamp(safeVal(cpu.temp, 0).back() * 100 / cpu.temp_max, 0ll, 100ll));
-			if ((b_column_size > 1 or b_columns > 1) and temp_graphs.size() >= 1ll)
-				out += ' ' + Theme::c("inactive_fg") + graph_bg * 5 + Mv::l(5) + temp_color
-					+ temp_graphs.at(0)(safeVal(cpu.temp, 0), data_same or redraw);
-			out += rjust(to_string(temp), 4) + Theme::c("main_fg") + unit;
-		}
-
-		if (show_watts) {
-			string cwatts = fmt::format(" {:>4.{}f}", cpu.usage_watts, cpu.usage_watts < 10.0f ? 2 : cpu.usage_watts < 100.0f ? 1 : 0);
-			string cwatts_post = "W";
-
-			max_observed_pwr = max(max_observed_pwr, cpu.usage_watts);
-			out += Theme::g("cached").at(clamp(cpu.usage_watts / max_observed_pwr * 100.0f, 0.0f, 100.0f)) + cwatts + Theme::c("main_fg") + cwatts_post; 
-		}
-
-			out += Theme::c("div_line") + Symbols::v_line;
-		} catch (const std::exception& e) {
-			throw std::runtime_error("graphs, clock, meter : " + string{e.what()});
-		}
-
-		int max_row = b_height - 3; // Subtracting one extra row for the load average (and power if enabled)
-		int n_gpus_to_show = 0;
-	#ifdef GPU_SUPPORT
-		n_gpus_to_show = show_gpu ? (gpus.size() - (gpu_always ? 0 : Gpu::shown)) : 0;
-	#endif
-		max_row -= n_gpus_to_show;
-
-		auto is_cpu_enabled = [&cpu](const std::int32_t num) -> bool {
-			return !cpu.active_cpus.has_value() || std::ranges::find(cpu.active_cpus.value(), num) != cpu.active_cpus.value().end();
-		};
-
-		//? Core text and graphs
-		int cx = 0, cy = 1, cc = 0, core_width = (b_column_size == 0 ? 2 : 3);
-		if (Shared::coreCount >= 100) core_width++;
-		for (const auto& n : iota(0, Shared::coreCount)) {
-			auto enabled = is_cpu_enabled(n);
-			out += Mv::to(b_y + cy + 1, b_x + cx + 1) + Theme::c(enabled ? "main_fg" : "inactive_fg") + (Shared::coreCount < 100 ? Fx::b + 'C' + Fx::ub : "")
-				+ ljust(to_string(n), core_width);
-			if ((b_column_size > 0 or extra_width > 0) and cmp_less(n, core_graphs.size()))
-				out += Theme::c("inactive_fg") + graph_bg * (5 * b_column_size + extra_width) + Mv::l(5 * b_column_size + extra_width)
-					+ core_graphs.at(n)(safeVal(cpu.core_percent, n), data_same or redraw);
-
-			out += enabled ? Theme::g("cpu").at(clamp(safeVal(cpu.core_percent, n).back(), 0ll, 100ll)) : Theme::c("inactive_fg");
-			out += rjust(to_string(safeVal(cpu.core_percent, n).back()), (b_column_size < 2 ? 3 : 4)) + Theme::c(enabled ? "main_fg" : "inactive_fg") + '%';
-
-			if (show_temps and not hide_cores) {
-				const auto [temp, unit] = celsius_to(safeVal(cpu.temp, n+1).back(), temp_scale);
-				const auto temp_color = enabled ? Theme::g("temp").at(clamp(safeVal(cpu.temp, n+1).back() * 100 / cpu.temp_max, 0ll, 100ll)) : Theme::c("inactive_fg");
-				if (b_column_size > 1 and std::cmp_greater_equal(temp_graphs.size(), n))
-					out += ' ' + Theme::c("inactive_fg") + graph_bg * 5 + Mv::l(5)
-						+ temp_graphs.at(n+1)(safeVal(cpu.temp, n+1), data_same or redraw);
-				out += temp_color + rjust(to_string(temp), 4) + Theme::c(enabled ? "main_fg" : "inactive_fg") + unit;
-			}
-
-			out += Theme::c("div_line") + Symbols::v_line;
-
-			if ((++cy > ceil((double)Shared::coreCount / b_columns) or cy == max_row) and n != Shared::coreCount - 1) {
-				if (++cc >= b_columns) break;
-				cy = 1; cx = (b_width / b_columns) * cc;
-			}
-		}
-
-		//? Load average
-		if (cy < b_height - 1 and cc <= b_columns) {
-			cy = b_height - 2 - n_gpus_to_show;
-
-			string load_avg_pre = "Load avg:";
-			string load_avg;
-
-			for (const auto& val : cpu.load_avg) {
-				load_avg += fmt::format(" {:.2f}", val);
-			}
-
-			int len = load_avg_pre.size() + load_avg.size();
-			out += Mv::to(b_y + cy, b_x + 1) + string(max(b_width - len - 2, 0), ' ') + Theme::c("main_fg") + Fx::b + load_avg_pre + Fx::ub + load_avg;
-		}
-
-	#ifdef GPU_SUPPORT
-		//? Gpu brief info
-		if (show_gpu) {
-			for (unsigned long i = 0; i < gpus.size(); ++i) {
-				if (gpu_auto and v_contains(Gpu::shown_panels, i))
-					continue;
-				out += Mv::to(b_y + ++cy, b_x + 1) + Theme::c("main_fg") + Fx::b + "GPU";
-				if (gpus.size() > 1) out += rjust(to_string(i), 1 + (gpus.size() > 9));
-				if (gpus[i].supported_functions.gpu_utilization) {
-					out += ' ';
-					if (b_columns > 1) {
-					out += gpu_meters[i](safeVal(gpus[i].gpu_percent, "gpu-totals"s).back())
-						+ Theme::g("cpu").at(clamp(safeVal(gpus[i].gpu_percent, "gpu-totals"s).back(), 0ll, 100ll));
-					}
-					out += rjust(to_string(safeVal(gpus[i].gpu_percent, "gpu-totals"s).back()), 3) + Theme::c("main_fg") + '%';
-					if (b_columns == 1)
-						out += ' ';
-				}
-				if (gpus[i].supported_functions.mem_used and gpus[i].supported_functions.mem_total and b_columns > 1) {
-					out += ' ' + Theme::c("inactive_fg") + graph_bg * 5 + Mv::l(5) + Theme::g("used").at(safeVal(gpus[i].gpu_percent, "gpu-vram-totals"s).back())
-						+ gpu_mem_graphs[i](safeVal(gpus[i].gpu_percent, "gpu-vram-totals"s), data_same or redraw);
-				}
-				if (gpus[i].supported_functions.mem_used) {
-						out += Theme::c("main_fg")
-						+ rjust(floating_humanizer(gpus[i].mem_used, true), 5);
-				}
-				if (gpus[i].supported_functions.mem_total) {
-						out += Theme::c("inactive_fg") + '/' + Theme::c("main_fg") + ljust(floating_humanizer(gpus[i].mem_total, true), 4);
-				}
-				if (show_temps and gpus[i].supported_functions.temp_info) {
-					const auto [temp, unit] = celsius_to(gpus[i].temp.back(), temp_scale);
-					out += ' ';
-					if (b_columns > 1)
-						out += Theme::c("inactive_fg") + graph_bg * 5 + Mv::l(5) + Theme::g("temp").at(clamp(gpus[i].temp.back() * 100 / gpus[i].temp_max, 0ll, 100ll))
-							+ gpu_temp_graphs[i](gpus[i].temp, data_same or redraw);
-					else out += Theme::g("temp").at(clamp(gpus[i].temp.back() * 100 / gpus[i].temp_max, 0ll, 100ll));
-					out += rjust(to_string(temp), 3) + Theme::c("main_fg") + unit;
-				}
-				if (gpus[i].supported_functions.pwr_usage) {
-					out += ' ' + Theme::g("cached").at(clamp(safeVal(gpus[i].gpu_percent, "gpu-pwr-totals"s).back(), 0ll, 100ll))
-						+ fmt::format("{:>4.{}f}", gpus[i].pwr_usage / 1000.0, gpus[i].pwr_usage < 10'000 ? 2 : gpus[i].pwr_usage < 100'000 ? 1 : 0) + Theme::c("main_fg") + 'W';
-				}
-
-				if (cy > b_height - 1) break;
-			}
-		}
-	#endif
-
-		redraw = false;
-		return out + Fx::reset;
+	// Cpu draw function stubbed out - stock btop monitoring disabled
+	string draw([[maybe_unused]] const cpu_info& cpu, [[maybe_unused]] const vector<Gpu::gpu_info>& gpus, 
+	            [[maybe_unused]] bool force_redraw, [[maybe_unused]] bool data_same) {
+		return "";
 	}
-
 }
 
 #ifdef GPU_SUPPORT
@@ -989,172 +570,10 @@ namespace Gpu {
 	vector<Draw::Meter> enc_meter_vec = {};
 	vector<string> box = {};
 
-    string draw(const gpu_info& gpu, unsigned long index, bool force_redraw, bool data_same) {
-		if (Runner::stopping) return "";
-
-		auto& b_x = b_x_vec[index];
-		auto& b_y = b_y_vec[index];
-		auto& x = x_vec[index];
-		auto& y = y_vec[index];
-
-		auto& graph_upper = graph_upper_vec[index];
-		auto& graph_lower = graph_lower_vec[index];
-		auto& temp_graph = temp_graph_vec[index];
-		auto& mem_used_graph = mem_used_graph_vec[index];
-		auto& mem_util_graph = mem_util_graph_vec[index];
-		auto& gpu_meter = gpu_meter_vec[index];
-		auto& pwr_meter = pwr_meter_vec[index];
-		auto& enc_meter = enc_meter_vec[index];
-
-		if (force_redraw) redraw[index] = true;
-        bool show_temps = gpu.supported_functions.temp_info and (Config::getB("check_temp"));
-        auto tty_mode = Config::getB("tty_mode");
-		auto& temp_scale = Config::getS("temp_scale");
-		auto& graph_symbol = (tty_mode ? "tty" : Config::getS("graph_symbol_gpu"));
-		auto& graph_bg = Symbols::graph_symbols.at((graph_symbol == "default" ? Config::getS("graph_symbol") + "_up" : graph_symbol + "_up")).at(6);
-        auto single_graph = !Config::getB("gpu_mirror_graph");
-		string out;
-		int height = gpu_b_height_offsets[index] + 4;
-		out.reserve(width * height);
-
-		//* Redraw elements not needed to be updated every cycle
-		if (redraw[index]) {
-			out += box[index];
-
-			graph_up_height = single_graph ? b_height_vec[index] : (b_height_vec[index] + 1) / 2;
-			int graph_low_height = single_graph ? 0 : b_height_vec[index] - graph_up_height;
-
-			if (gpu.supported_functions.gpu_utilization) {
-				graph_upper = Draw::Graph{x + width - b_width - 3, graph_up_height, "cpu", safeVal(gpu.gpu_percent, "gpu-totals"s), graph_symbol, false, true}; // TODO cpu -> gpu
-            	if (not single_graph) {
-                	graph_lower = Draw::Graph{
-                    	x + width - b_width - 3,
-                    	graph_low_height, "cpu",
-                    	safeVal(gpu.gpu_percent, "gpu-totals"s),
-                    	graph_symbol,
-                    	Config::getB("cpu_invert_lower"), true
-                	};
-            	}
-				gpu_meter = Draw::Meter{b_width - (show_temps ? 25 : 12), "cpu"};
-			}
-			if (gpu.supported_functions.temp_info)
-				temp_graph = Draw::Graph{6, 1, "temp", gpu.temp, graph_symbol, false, false, gpu.temp_max, -23};
-			if (gpu.supported_functions.pwr_usage)
-				pwr_meter = Draw::Meter{b_width - (gpu.supported_functions.pwr_state and gpu.pwr_state != 32 ? 25 : 12), "cached"};
-			if (gpu.supported_functions.mem_utilization)
-				mem_util_graph = Draw::Graph{b_width/2 - 1, 2, "free", gpu.mem_utilization_percent, graph_symbol, 0, 0, 100, 4}; // offset so the graph isn't empty at 0-5% utilization
-			if (gpu.supported_functions.mem_used and gpu.supported_functions.mem_total)
-				mem_used_graph = Draw::Graph{b_width/2 - 2, 2 + 2*(gpu.supported_functions.mem_utilization), "used", safeVal(gpu.gpu_percent, "gpu-vram-totals"s), graph_symbol};
-			if (gpu.supported_functions.encoder_utilization)
-				enc_meter = Draw::Meter{b_width/2 - 10, "cpu"};
-		}
-
-
-		//* General GPU info
-		int rows_used = 1;
-		//? Gpu graph, meter & clock speed
-		if (gpu.supported_functions.gpu_utilization) {
-			out += Fx::ub + Mv::to(y + rows_used, x + 1) + graph_upper(safeVal(gpu.gpu_percent, "gpu-totals"s), (data_same or redraw[index]));
-			if (not single_graph)
-				out += Mv::to(y + rows_used + graph_up_height, x + 1) + graph_lower(safeVal(gpu.gpu_percent, "gpu-totals"s), (data_same or redraw[index]));
-
-			out += Mv::to(b_y + rows_used, b_x + 1) + Theme::c("main_fg") + Fx::b + "GPU " + gpu_meter(safeVal(gpu.gpu_percent, "gpu-totals"s).back())
-				+ Theme::g("cpu").at(clamp(safeVal(gpu.gpu_percent, "gpu-totals"s).back(), 0ll, 100ll)) + rjust(to_string(safeVal(gpu.gpu_percent, "gpu-totals"s).back()), 5) + Theme::c("main_fg") + '%';
-
-			//? Temperature graph, I assume the device supports utilization if it supports temperature
-			if (show_temps) {
-				const auto [temp, unit] = celsius_to(gpu.temp.back(), temp_scale);
-				out += ' ' + Theme::c("inactive_fg") + graph_bg * 6 + Mv::l(6) + Theme::g("temp").at(clamp(gpu.temp.back() * 100 / gpu.temp_max, 0ll, 100ll))
-					+ temp_graph(gpu.temp, data_same or redraw[index]);
-				out += rjust(to_string(temp), 4) + Theme::c("main_fg") + unit;
-			}
-			out += Theme::c("div_line") + Symbols::v_line;
-			rows_used++;
-		}
-
-		if (gpu.supported_functions.gpu_clock) {
-			string clock_speed_string = to_string(gpu.gpu_clock_speed);
-			out += Mv::to(b_y, b_x + b_width - 12) + Theme::c("div_line") + Symbols::h_line*(5-clock_speed_string.size())
-				+ Symbols::title_left + Fx::b + Theme::c("title") + clock_speed_string + " MHz" + Fx::ub + Theme::c("div_line") + Symbols::title_right;
-		}
-
-		//? Power usage meter, power state
-		if (gpu.supported_functions.pwr_usage) {
-			out += Mv::to(b_y + rows_used, b_x + 1) + Theme::c("main_fg") + Fx::b + "PWR " + pwr_meter(safeVal(gpu.gpu_percent, "gpu-pwr-totals"s).back())
-				+ Theme::g("cached").at(clamp(safeVal(gpu.gpu_percent, "gpu-pwr-totals"s).back(), 0ll, 100ll))
-				+ fmt::format("{:>5.{}f}", gpu.pwr_usage / 1000.0, gpu.pwr_usage < 10'000 ? 2 : gpu.pwr_usage < 100'000 ? 1 : 0) + Theme::c("main_fg") + 'W';
-			if (gpu.supported_functions.pwr_state and gpu.pwr_state != 32) // NVML_PSTATE_UNKNOWN; unsupported or non-nvidia card
-				out += std::string(" P-state: ") + (gpu.pwr_state > 9 ? "" : " ") + 'P' + Theme::g("cached").at(clamp(gpu.pwr_state, 0ll, 100ll)) + to_string(gpu.pwr_state);
-			rows_used++;
-		}
-
-		//? Encode and Decode meters
-		bool drawnEncDec = gpu.supported_functions.encoder_utilization and gpu.supported_functions.decoder_utilization;
-		if (drawnEncDec) {
-			out += Mv::to(b_y + rows_used, b_x +1) + Theme::c("main_fg") + Fx::b + "ENC " + enc_meter(gpu.encoder_utilization)
-				+ Theme::g("cpu").at(clamp(gpu.encoder_utilization, 0ll, 100ll)) + rjust(to_string(gpu.encoder_utilization), 4) + Theme::c("main_fg") + '%'
-				+ Theme::c("div_line") + Symbols::v_line + Theme::c("main_fg") + Fx::b + "DEC " + enc_meter(gpu.decoder_utilization)
-				+ Theme::g("cpu").at(clamp(gpu.decoder_utilization, 0ll, 100ll)) + rjust(to_string(gpu.decoder_utilization), 4) + Theme::c("main_fg") + '%';
-			rows_used++;
-		}
-
-		if (gpu.supported_functions.mem_total or gpu.supported_functions.mem_used) {
-			out += Mv::to(b_y + rows_used, b_x);
-			if (gpu.supported_functions.mem_total and gpu.supported_functions.mem_used) {
-				string used_memory_string = floating_humanizer(gpu.mem_used);
-
-				auto offset = (gpu.supported_functions.mem_total or gpu.supported_functions.mem_used)
-					* (1 + 2*(gpu.supported_functions.mem_total and gpu.supported_functions.mem_used) + 2*gpu.supported_functions.mem_utilization);
-
-				//? Used graph, memory section header, total vram
-				out += Theme::c("div_line") + Symbols::div_left + Symbols::h_line + Symbols::title_left + Fx::b + Theme::c("title") + "vram" + Theme::c("div_line") + Fx::ub + Symbols::title_right
-					+  Symbols::h_line*(b_width/2-8) + Symbols::div_up + Mv::d(offset)+Mv::l(1) + Symbols::div_down + Mv::l(1)+Mv::u(1) + (Symbols::v_line + Mv::l(1)+Mv::u(1))*(offset-1) + Symbols::div_up
-					+  Symbols::h_line + Theme::c("title") + "Used:" + Theme::c("div_line")
-					+  Symbols::h_line*(b_width/2+b_width%2-9-used_memory_string.size()) + Theme::c("title") + used_memory_string + Theme::c("div_line") + Symbols::h_line + Symbols::div_right
-					+  Mv::d(1) + Mv::l(b_width/2-1) + mem_used_graph(safeVal(gpu.gpu_percent, "gpu-vram-totals"s), (data_same or redraw[index]))
-					+  Mv::l(b_width-3) + Mv::u(1+2*gpu.supported_functions.mem_utilization) + Theme::c("main_fg") + Fx::b + "Total:" + rjust(floating_humanizer(gpu.mem_total), b_width/2-9) + Fx::ub
-					+  Mv::r(3) + rjust(to_string(safeVal(gpu.gpu_percent, "gpu-vram-totals"s).back()), 3) + '%';
-
-				//? Memory utilization
-				if (gpu.supported_functions.mem_utilization)
-					out += Mv::l(b_width/2+6) + Mv::d(1) + Theme::c("div_line") + Symbols::div_left+Symbols::h_line + Theme::c("title") + "Utilization:" + Theme::c("div_line") + Symbols::h_line*(b_width/2-14) + Symbols::div_right
-						+  Mv::l(b_width/2)   + Mv::d(1) + mem_util_graph(gpu.mem_utilization_percent, (data_same or redraw[index]))
-						+  Mv::l(b_width/2-1) + Mv::u(1) + rjust(to_string(gpu.mem_utilization_percent.back()), 3) + '%';
-
-				//? Memory clock speed
-				if (gpu.supported_functions.mem_clock) {
-					string clock_speed_string = to_string(gpu.mem_clock_speed);
-					out += Mv::to(b_y + rows_used, b_x + b_width/2 - 11) + Theme::c("div_line") + Symbols::h_line*(5-clock_speed_string.size())
-						+ Symbols::title_left + Fx::b + Theme::c("title") + clock_speed_string + " MHz" + Fx::ub + Theme::c("div_line") + Symbols::title_right;
-				}
-			} else {
-				out += Theme::c("main_fg") + Mv::r(1);
-				if (gpu.supported_functions.mem_total)
-					out += "VRAM total:" + rjust(floating_humanizer(gpu.mem_total), b_width/(1 + gpu.supported_functions.mem_clock)-14);
-				else out += "VRAM usage:" + rjust(floating_humanizer(gpu.mem_used), b_width/(1 + gpu.supported_functions.mem_clock)-14);
-
-				if (gpu.supported_functions.mem_clock)
-					out += "   VRAM clock:" + rjust(to_string(gpu.mem_clock_speed) + " MHz", b_width/2-13);
-			}
-		}
-
-		//? Processes section header
-		//out += Mv::to(b_y+8, b_x) + Theme::c("div_line") + Symbols::div_left + Symbols::h_line + Symbols::title_left + Theme::c("main_fg") + Fx::b + "gpu-proc" + Fx::ub + Theme::c("div_line")
-		//	+ Symbols::title_right + Symbols::h_line*(b_width/2-12) + Symbols::div_down + Symbols::h_line*(b_width/2-2) + Symbols::div_right;
-
-		//? PCIe link throughput
-		if (gpu.supported_functions.pcie_txrx and Config::getB("nvml_measure_pcie_speeds")) {
-			string tx_string = floating_humanizer(gpu.pcie_tx, 0, 1, 0, 1);
-			string rx_string = floating_humanizer(gpu.pcie_rx, 0, 1, 0, 1);
-			out += Mv::to(b_y + b_height_vec[index] - 1, b_x+2) + Theme::c("div_line")
-				+ Symbols::title_left_down + Theme::c("title") + Fx::b + "TX:" + Fx::ub + Theme::c("div_line") + Symbols::title_right_down + Symbols::h_line*(b_width/2-9-tx_string.size())
-				+ Symbols::title_left_down + Theme::c("title") + Fx::b + tx_string + Fx::ub + Theme::c("div_line") + Symbols::title_right_down + (gpu.supported_functions.mem_total and gpu.supported_functions.mem_used ? Symbols::div_down : Symbols::h_line)
-				+ Symbols::title_left_down + Theme::c("title") + Fx::b + "RX:" + Fx::ub + Theme::c("div_line") + Symbols::title_right_down + Symbols::h_line*(b_width/2+b_width%2-9-rx_string.size())
-				+ Symbols::title_left_down + Theme::c("title") + Fx::b + rx_string + Fx::ub + Theme::c("div_line") + Symbols::title_right_down + Symbols::round_right_down;
-		}
-
-		redraw[index] = false;
-		return out + Fx::reset;
+	// Gpu draw function stubbed out - stock btop monitoring disabled
+	string draw([[maybe_unused]] const gpu_info& gpu, [[maybe_unused]] unsigned long index, 
+	            [[maybe_unused]] bool force_redraw, [[maybe_unused]] bool data_same) {
+		return "";
 	}
 
 }
@@ -1175,253 +594,9 @@ namespace Mem {
 	std::unordered_map<string, Draw::Meter> disk_meters_free;
 	std::unordered_map<string, Draw::Graph> io_graphs;
 
-	string draw(const mem_info& mem, bool force_redraw, bool data_same) {
-		if (Runner::stopping) return "";
-		if (force_redraw) redraw = true;
-		auto show_swap = Config::getB("show_swap");
-		auto swap_disk = Config::getB("swap_disk");
-		auto show_disks = Config::getB("show_disks");
-		auto show_io_stat = Config::getB("show_io_stat");
-		auto io_mode = Config::getB("io_mode");
-		auto io_graph_combined = Config::getB("io_graph_combined");
-		auto use_graphs = Config::getB("mem_graphs");
-		auto tty_mode = Config::getB("tty_mode");
-		auto& graph_symbol = (tty_mode ? "tty" : Config::getS("graph_symbol_mem"));
-		auto& graph_bg = Symbols::graph_symbols.at((graph_symbol == "default" ? Config::getS("graph_symbol") + "_up" : graph_symbol + "_up")).at(6);
-		auto totalMem = Mem::get_totalMem();
-		string out;
-		out.reserve(height * width);
-
-		//* Redraw elements not needed to be updated every cycle
-		if (redraw) {
-			out += box;
-			mem_meters.clear();
-			mem_graphs.clear();
-			disk_meters_free.clear();
-			disk_meters_used.clear();
-			io_graphs.clear();
-
-			//? Mem graphs and meters
-			for (const auto& name : mem_names) {
-
-				if (use_graphs)
-					mem_graphs[name] = Draw::Graph{mem_meter, graph_height, name, safeVal(mem.percent, name), graph_symbol};
-				else
-					mem_meters[name] = Draw::Meter{mem_meter, name};
-			}
-			if (show_swap and has_swap) {
-				for (const auto& name : swap_names) {
-					if (use_graphs)
-						mem_graphs[name] = Draw::Graph{mem_meter, graph_height, name.substr(5), safeVal(mem.percent, name), graph_symbol};
-					else
-						mem_meters[name] = Draw::Meter{mem_meter, name.substr(5)};
-				}
-			}
-
-			//? Disk meters and io graphs
-			if (show_disks) {
-				if (show_io_stat or io_mode) {
-					std::unordered_map<string, int> custom_speeds;
-					int half_height = 0;
-					if (io_mode) {
-						disks_io_h = max((int)floor((double)(height - 2 - (disk_ios * 2)) / max(1, disk_ios)), (io_graph_combined ? 1 : 2));
-						half_height = ceil((double)disks_io_h / 2);
-
-						if (not Config::getS("io_graph_speeds").empty()) {
-							auto split = ssplit(Config::getS("io_graph_speeds"));
-							for (const auto& entry : split) {
-								auto vals = ssplit(entry, ':');
-								if (vals.size() == 2 and mem.disks.contains(vals.at(0)) and isint(vals.at(1)))
-									try {
-										custom_speeds[vals.at(0)] = std::stoi(vals.at(1));
-									}
-									catch (const std::out_of_range&) { continue; }
-							}
-						}
-					}
-
-					for (const auto& [name, disk] : mem.disks) {
-						if (disk.io_read.empty()) continue;
-
-						io_graphs[name + "_activity"] = Draw::Graph{disks_width - 6, 1, "available", disk.io_activity, graph_symbol};
-
-						if (io_mode) {
-							//? Create one combined graph for IO read/write if enabled
-							long long speed = (custom_speeds.contains(name) ? custom_speeds.at(name) : 100) << 20;
-							if (io_graph_combined) {
-								deque<long long> combined(disk.io_read.size(), 0);
-								rng::transform(disk.io_read, disk.io_write, combined.begin(), std::plus<long long>());
-								io_graphs[name] = Draw::Graph{
-									disks_width, disks_io_h, "available", combined,
-									graph_symbol, false, true, speed};
-							}
-							else {
-								io_graphs[name + "_read"] = Draw::Graph{
-									disks_width, half_height, "free",
-									disk.io_read, graph_symbol, false,
-									true, speed};
-								io_graphs[name + "_write"] = Draw::Graph{
-									disks_width, disks_io_h - half_height,
-									"used", disk.io_write, graph_symbol,
-									true, true, speed};
-							}
-						}
-					}
-				}
-
-				for (int i = 0; const auto& [name, ignored] : mem.disks) {
-					if (i * 2 > height - 2) break;
-					disk_meters_used[name] = Draw::Meter{disk_meter, "used"};
-					if (cmp_less_equal(mem.disks.size() * 3, height - 1))
-						disk_meters_free[name] = Draw::Meter{disk_meter, "free"};
-				}
-
-				out += Mv::to(y, x + width - 6) + Fx::ub + Theme::c("mem_box") + Symbols::title_left + (io_mode ? Fx::b : "") + Theme::c("hi_fg")
-				+ 'i' + Theme::c("title") + 'o' + Fx::ub + Theme::c("mem_box") + Symbols::title_right;
-				Input::mouse_mappings["i"] = {y, x + width - 5, 1, 2};
-			}
-
-		}
-
-		//? Mem and swap
-		int cx = 1, cy = 1;
-		string divider = (graph_height > 0 ? Mv::l(2) + Theme::c("mem_box") + Symbols::div_left + Theme::c("div_line") + Symbols::h_line * (mem_width - 1)
-						+ (show_disks ? "" : Theme::c("mem_box")) + Symbols::div_right + Mv::l(mem_width - 1) + Theme::c("main_fg") : "");
-		string up = (graph_height >= 2 ? Mv::l(mem_width - 2) + Mv::u(graph_height - 1) : "");
-		bool big_mem = mem_width > 21;
-
-		out += Mv::to(y + 1, x + 2) + Theme::c("title") + Fx::b + "Total:" + rjust(floating_humanizer(totalMem), mem_width - 9) + Fx::ub + Theme::c("main_fg");
-		vector<string> comb_names (mem_names.begin(), mem_names.end());
-		if (show_swap and has_swap and not swap_disk) comb_names.insert(comb_names.end(), swap_names.begin(), swap_names.end());
-		for (const auto& name : comb_names) {
-			if (cy > height - 4) break;
-			string title;
-			if (name == "swap_used") {
-				if (cy > height - 5) break;
-				if (height - cy > 6) {
-					if (graph_height > 0) out += Mv::to(y+1+cy, x+1+cx) + divider;
-					cy += 1;
-				}
-				out += Mv::to(y+1+cy, x+1+cx) + Theme::c("title") + Fx::b + "Swap:" + rjust(floating_humanizer(safeVal(mem.stats, "swap_total"s)), mem_width - 8)
-					+ Theme::c("main_fg") + Fx::ub;
-				cy += 1;
-				title = "Used";
-			}
-			else if (name == "swap_free")
-				title = "Free";
-
-			if (title.empty()) title = capitalize(name);
-			const string humanized = floating_humanizer(safeVal(mem.stats, name));
-			const int offset = max(0, divider.empty() ? 9 - (int)humanized.size() : 0);
-			const string graphics = (
-				use_graphs and mem_graphs.contains(name) ? mem_graphs.at(name)(safeVal(mem.percent, name), redraw or data_same)
-				: mem_meters.contains(name) ? mem_meters.at(name)(safeVal(mem.percent, name).back())
-				: "");
-			if (mem_size > 2) {
-				out += Mv::to(y+1+cy, x+1+cx) + divider + title.substr(0, big_mem ? 10 : 5) + ":"
-					+ Mv::to(y+1+cy, x+cx + mem_width - 2 - humanized.size()) + (divider.empty() ? Mv::l(offset) + string(" ") * offset + humanized : trans(humanized))
-					+ Mv::to(y+2+cy, x+cx + (graph_height >= 2 ? 0 : 1)) + graphics + up + rjust(to_string(safeVal(mem.percent, name).back()) + "%", 4);
-				cy += (graph_height == 0 ? 2 : graph_height + 1);
-			}
-			else {
-				out += Mv::to(y+1+cy, x+1+cx) + ljust(title, (mem_size > 1 ? 5 : 1)) + (graph_height >= 2 ? "" : " ")
-					+ graphics + Theme::c("title") + rjust(humanized, (mem_size > 1 ? 9 : 7));
-				cy += (graph_height == 0 ? 1 : graph_height);
-			}
-		}
-		if (graph_height > 0 and cy < height - 2)
-			out += Mv::to(y+1+cy, x+1+cx) + divider;
-
-		//? Disks
-		if (show_disks) {
-			const auto& disks = mem.disks;
-			cx = mem_width; cy = 0;
-			bool big_disk = disks_width >= 25;
-			divider = Mv::l(1) + Theme::c("div_line") + Symbols::div_left + Symbols::h_line * disks_width + Theme::c("mem_box") + Fx::ub + Symbols::div_right + Mv::l(disks_width);
-			const string hu_div = Theme::c("div_line") + Symbols::h_line + Theme::c("main_fg");
-			if (io_mode) {
-				for (const auto& mount : mem.disks_order) {
-					if (not disks.contains(mount)) continue;
-					if (cy > height - 3) break;
-					const auto disk = safeVal(disks, mount);
-					if (disk.io_read.empty()) continue;
-					const string total = floating_humanizer(disk.total, not big_disk);
-					out += Mv::to(y+1+cy, x+1+cx) + divider + Theme::c("title") + Fx::b + uresize(disk.name, disks_width - 8) + Mv::to(y+1+cy, x+cx + disks_width - total.size())
-						+ trans(total) + Fx::ub;
-					if (big_disk) {
-						const string used_percent = to_string(disk.used_percent);
-						out += Mv::to(y+1+cy, x+1+cx + round((double)disks_width / 2) - round((double)used_percent.size() / 2) - 1) + hu_div + used_percent + '%' + hu_div;
-					}
-					if (io_graphs.contains(mount + "_activity")) {
-					out += Mv::to(y+2+cy++, x+1+cx) + (big_disk ? " IO% " : " IO   " + Mv::l(2)) + Theme::c("inactive_fg") + graph_bg * (disks_width - 6)
-						+ Mv::l(disks_width - 6) + io_graphs.at(mount + "_activity")(disk.io_activity, redraw or data_same) + Theme::c("main_fg");
-					}
-					if (++cy > height - 3) break;
-					if (io_graph_combined) {
-						if (not io_graphs.contains(mount)) continue;
-						auto comb_val = disk.io_read.back() + disk.io_write.back();
-						const string humanized = (disk.io_write.back() > 0 ? "▼"s : ""s) + (disk.io_read.back() > 0 ? "▲"s : ""s)
-												+ (comb_val > 0 ? Mv::r(1) + floating_humanizer(comb_val, true) : "RW");
-						if (disks_io_h == 1) out += Mv::to(y+1+cy, x+1+cx) + string(5, ' ');
-						out += Mv::to(y+1+cy, x+1+cx) + io_graphs.at(mount)({comb_val}, redraw or data_same)
-							+ Mv::to(y+1+cy, x+1+cx) + Theme::c("main_fg") + humanized;
-						cy += disks_io_h;
-					}
-					else {
-						if (not io_graphs.contains(mount + "_read") or not io_graphs.contains(mount + "_write")) continue;
-						const string human_read = (disk.io_read.back() > 0 ? "▲" + floating_humanizer(disk.io_read.back(), true) : "R");
-						const string human_write = (disk.io_write.back() > 0 ? "▼" + floating_humanizer(disk.io_write.back(), true) : "W");
-						if (disks_io_h <= 3) out += Mv::to(y+1+cy, x+1+cx) + string(5, ' ') + Mv::to(y+cy + disks_io_h, x+1+cx) + string(5, ' ');
-						out += Mv::to(y+1+cy, x+1+cx) + io_graphs.at(mount + "_read")(disk.io_read, redraw or data_same) + Mv::l(disks_width)
-							+ Mv::d(1) + io_graphs.at(mount + "_write")(disk.io_write, redraw or data_same)
-							+ Mv::to(y+1+cy, x+1+cx) + human_read + Mv::to(y+cy + disks_io_h, x+1+cx) + human_write;
-						cy += disks_io_h;
-					}
-				}
-			}
-			else {
-				for (const auto& mount : mem.disks_order) {
-					if (not disks.contains(mount)) continue;
-					if (cy > height - 3) break;
-					const auto disk = safeVal(disks, mount);
-					if (disk.name.empty() or not disk_meters_used.contains(mount)) continue;
-					auto comb_val = (not disk.io_read.empty() ? disk.io_read.back() + disk.io_write.back() : 0ll);
-					const string human_io = (comb_val > 0 ? (disk.io_write.back() > 0 and big_disk ? "▼"s : ""s) + (disk.io_read.back() > 0 and big_disk ? "▲"s : ""s)
-											+ floating_humanizer(comb_val, true) : "");
-					const string human_total = floating_humanizer(disk.total, not big_disk);
-					const string human_used = floating_humanizer(disk.used, not big_disk);
-					const string human_free = floating_humanizer(disk.free, not big_disk);
-
-					out += Mv::to(y+1+cy, x+1+cx) + divider + Theme::c("title") + Fx::b + uresize(disk.name, disks_width - 8) + Mv::to(y+1+cy, x+cx + disks_width - human_total.size())
-						+ trans(human_total) + Fx::ub + Theme::c("main_fg");
-					if (big_disk and not human_io.empty())
-						out += Mv::to(y+1+cy, x+1+cx + round((double)disks_width / 2) - round((double)human_io.size() / 2) - 1) + hu_div + human_io + hu_div;
-					if (++cy > height - 3) break;
-					if (show_io_stat and io_graphs.contains(mount + "_activity")) {
-						out += Mv::to(y+1+cy, x+1+cx) + (big_disk ? " IO% " : " IO   " + Mv::l(2)) + Theme::c("inactive_fg") + graph_bg * (disks_width - 6) + Theme::g("available").at(clamp(disk.io_activity.back(), 50ll, 100ll))
-							+ Mv::l(disks_width - 6) + io_graphs.at(mount + "_activity")(disk.io_activity, redraw or data_same) + Theme::c("main_fg");
-						if (not big_disk) out += Mv::to(y+1+cy, x+cx+1) + Theme::c("main_fg") + human_io;
-						if (++cy > height - 3) break;
-					}
-
-					out += Mv::to(y+1+cy, x+1+cx) + (big_disk ? " Used:" + rjust(to_string(disk.used_percent) + '%', 4) : "U") + ' '
-						+ disk_meters_used.at(mount)(disk.used_percent) + rjust(human_used, (big_disk ? 9 : 5));
-					if (++cy > height - 3) break;
-
-					if (disk_meters_free.contains(mount) and cmp_less_equal(disks.size() * 3 + (show_io_stat ? disk_ios : 0), height - 1)) {
-						out += Mv::to(y+1+cy, x+1+cx) + (big_disk ? " Free:" + rjust(to_string(disk.free_percent) + '%', 4) : "F") + ' '
-						+ disk_meters_free.at(mount)(disk.free_percent) + rjust(human_free, (big_disk ? 9 : 5));
-						cy++;
-						if (cmp_less_equal(disks.size() * 4 + (show_io_stat ? disk_ios : 0), height - 1)) cy++;
-					}
-
-				}
-			}
-			if (cy < height - 2) out += Mv::to(y+1+cy, x+1+cx) + divider;
-		}
-
-		redraw = false;
-		return out + Fx::reset;
+	// Mem draw function stubbed out - stock btop monitoring disabled
+	string draw([[maybe_unused]] const mem_info& mem, [[maybe_unused]] bool force_redraw, [[maybe_unused]] bool data_same) {
+		return "";
 	}
 
 }
@@ -1431,97 +606,15 @@ namespace Net {
 	int min_width = 36, min_height = 6;
 	int x = 1, y, width = 20, height;
 	int b_x, b_y, b_width, b_height, d_graph_height, u_graph_height;
-	bool shown = true, redraw = true;
-	const int MAX_IFNAMSIZ = 15;
+	bool shown = false, redraw = false;  // shown = false (disabled)
+	[[maybe_unused]] const int MAX_IFNAMSIZ = 15;
 	string old_ip;
 	std::unordered_map<string, Draw::Graph> graphs;
 	string box;
 
-	string draw(const net_info& net, bool force_redraw, bool data_same) {
-		if (Runner::stopping) return "";
-		if (force_redraw) redraw = true;
-		auto net_sync = Config::getB("net_sync");
-		auto net_auto = Config::getB("net_auto");
-		auto tty_mode = Config::getB("tty_mode");
-		auto& graph_symbol = (tty_mode ? "tty" : Config::getS("graph_symbol_net"));
-		string ip_addr = (net.ipv4.empty() ? net.ipv6 : net.ipv4);
-		if (old_ip != ip_addr) {
-			old_ip = ip_addr;
-			redraw = true;
-		}
-		string out;
-		out.reserve(width * height);
-		const string title_left = Theme::c("net_box") + Fx::ub + Symbols::title_left;
-		const string title_right = Theme::c("net_box") + Fx::ub + Symbols::title_right;
-		const int i_size = min((int)selected_iface.size(), MAX_IFNAMSIZ);
-		const long long down_max = (net_auto ? safeVal(graph_max, "download"s) : ((long long)(Config::getI("net_download")) << 20) / 8);
-		const long long up_max = (net_auto ? safeVal(graph_max, "upload"s) : ((long long)(Config::getI("net_upload")) << 20) / 8);
-
-		//* Redraw elements not needed to be updated every cycle
-		if (redraw) {
-			out = box;
-			//? Graphs
-			graphs.clear();
-			if (safeVal(net.bandwidth, "download"s).empty() or safeVal(net.bandwidth, "upload"s).empty())
-				return out + Fx::reset;
-			graphs["download"] = Draw::Graph{
-				width - b_width - 2, u_graph_height, "download",
-				net.bandwidth.at("download"), graph_symbol,
-				false, true, down_max};
-			graphs["upload"] = Draw::Graph{
-				width - b_width - 2, d_graph_height, "upload",
-				net.bandwidth.at("upload"), graph_symbol, true, true, up_max};
-
-			//? Interface selector and buttons
-
-			out += Mv::to(y, x+width - i_size - 9) + title_left + Fx::b + Theme::c("hi_fg") + Symbols::left + "b " + Theme::c("title")
-				+ uresize(selected_iface, MAX_IFNAMSIZ) + Theme::c("hi_fg") + " n" + Symbols::right + title_right
-				+ Mv::to(y, x+width - i_size - 15) + title_left + Theme::c("hi_fg") + (safeVal(net.stat, "download"s).offset + safeVal(net.stat, "upload"s).offset > 0 ? Fx::b : "") + 'z'
-				+ Theme::c("title") + "ero" + title_right;
-			Input::mouse_mappings["b"] = {y, x+width - i_size - 8, 1, 3};
-			Input::mouse_mappings["n"] = {y, x+width - 6, 1, 3};
-			Input::mouse_mappings["z"] = {y, x+width - i_size - 14, 1, 4};
-			if (width - i_size - 20 > 6) {
-				out += Mv::to(y, x+width - i_size - 21) + title_left + Theme::c("hi_fg") + (net_auto ? Fx::b : "") + 'a' + Theme::c("title") + "uto" + title_right;
-				Input::mouse_mappings["a"] = {y, x+width - i_size - 20, 1, 4};
-			}
-			if (width - i_size - 20 > 13) {
-				out += Mv::to(y, x+width - i_size - 27) + title_left + Theme::c("title") + (net_sync ? Fx::b : "") + 's' + Theme::c("hi_fg")
-					+ 'y' + Theme::c("title") + "nc" + title_right;
-				Input::mouse_mappings["y"] = {y, x+width - i_size - 26, 1, 4};
-			}
-		}
-
-		//? IP or device address
-		if (not ip_addr.empty() and cmp_greater(width - i_size - 36, ip_addr.size())) {
-			out += Mv::to(y, x + 8) + title_left + Theme::c("title") + Fx::b + ip_addr + title_right;
-		}
-
-		//? Graphs and stats
-		int cy = 0;
-		for (const string dir : {"download", "upload"}) {
-			out += Mv::to(y+1 + (dir == "upload" ? u_graph_height : 0), x + 1) + graphs.at(dir)(safeVal(net.bandwidth, dir), redraw or data_same or not net.connected)
-				+ Mv::to(y+1 + (dir == "upload" ? height - 3: 0), x + 1) + Fx::ub + Theme::c("graph_text")
-				+ floating_humanizer((dir == "upload" ? up_max : down_max), true);
-			const string speed = floating_humanizer(safeVal(net.stat, dir).speed, false, 0, false, true);
-			const string speed_bits = (b_width >= 20 ? floating_humanizer(safeVal(net.stat, dir).speed, false, 0, true, true) : "");
-			const string top = floating_humanizer(safeVal(net.stat, dir).top, false, 0, true, true);
-			const string total = floating_humanizer(safeVal(net.stat, dir).total);
-			const string symbol = (dir == "upload" ? "▲" : "▼");
-			out += Mv::to(b_y+1+cy, b_x+1) + Fx::ub + Theme::c("main_fg") + symbol + ' ' + ljust(speed, 10) + (b_width >= 20 ? rjust('(' + speed_bits + ')', 13) : "");
-			cy += (b_height == 5 ? 2 : 1);
-			if (b_height >= 8) {
-				out += Mv::to(b_y+1+cy, b_x+1) + symbol + ' ' + "Top: " + rjust('(' + top, (b_width >= 20 ? 17 : 9)) + ')';
-				cy++;
-			}
-			if (b_height >= 6) {
-				out += Mv::to(b_y+1+cy, b_x+1) + symbol + ' ' + "Total: " + rjust(total, (b_width >= 20 ? 16 : 8));
-				cy += (b_height > 6 and b_height % 2 ? 2 : 1);
-			}
-		}
-
-		redraw = false;
-		return out + Fx::reset;
+	// Net draw function stubbed out - stock btop monitoring disabled
+	string draw([[maybe_unused]] const net_info& net, [[maybe_unused]] bool force_redraw, [[maybe_unused]] bool data_same) {
+		return "";
 	}
 
 }
@@ -1531,7 +624,7 @@ namespace Proc {
 	int min_width = 44, min_height = 16;
 	int x, y, width = 20, height;
 	int start, selected, select_max;
-	bool shown = true, redraw = true;
+	bool shown = false, redraw = false;  // shown = false (disabled)
 	int selected_pid = 0, selected_depth = 0;
 	string selected_name;
 	std::unordered_map<size_t, Draw::Graph> p_graphs;
@@ -2083,32 +1176,41 @@ namespace Draw {
 		Cpu::height = Mem::height = Net::height = Proc::height = 0;
 		Cpu::redraw = Mem::redraw = Net::redraw = Proc::redraw = true;
 
-		Cpu::shown = boxes.contains("cpu");
+	#ifdef AZEROTHCORE_SUPPORT
+		Draw::AzerothCore::shown = boxes.contains("azerothcore");
+		if (Draw::AzerothCore::shown) {
+			Draw::AzerothCore::redraw = true;
+		}
+	#endif
+		// Disable all stock btop boxes - bottop only uses AzerothCore box
+		Cpu::shown = false;  // Disabled: boxes.contains("cpu");
 	#ifdef GPU_SUPPORT
 		Gpu::box.clear();
 		Gpu::width = 0;
 		Gpu::shown_panels.clear();
-		if (Gpu::count > 0) {
-			std::istringstream iss(boxes, std::istringstream::in);
-			string current;
-			while (iss >> current) {
-				if (current.starts_with("gpu"))
-					Gpu::shown_panels.push_back(current.back()-'0');
-			}
-		}
-		Gpu::shown = Gpu::shown_panels.size();
+		// Disabled GPU box
+		// if (Gpu::count > 0) {
+		// 	std::istringstream iss(boxes, std::istringstream::in);
+		// 	string current;
+		// 	while (iss >> current) {
+		// 		if (current.starts_with("gpu"))
+		// 			Gpu::shown_panels.push_back(current.back()-'0');
+		// 	}
+		// }
+		Gpu::shown = 0;  // Disabled: Gpu::shown_panels.size();
 
 		// Calculate the minimum possible GPU height, store in total_height
 		// The actual total_height value will of course be overwritten later
 		Gpu::total_height = 0;
-		for (int i = 0; i < Gpu::shown; i++) {
-			using namespace Gpu;
-			total_height += 4 + gpu_b_height_offsets[shown_panels[i]];
-		}
+		// Disabled GPU calculations
+		// for (int i = 0; i < Gpu::shown; i++) {
+		// 	using namespace Gpu;
+		// 	total_height += 4 + gpu_b_height_offsets[shown_panels[i]];
+		// }
 	#endif
-		Mem::shown = boxes.contains("mem");
-		Net::shown = boxes.contains("net");
-		Proc::shown = boxes.contains("proc");
+		Mem::shown = false;  // Disabled: boxes.contains("mem");
+		Net::shown = false;  // Disabled: boxes.contains("net");
+		Proc::shown = false; // Disabled: boxes.contains("proc");
 
 		//* Calculate and draw cpu box outlines
 		if (Cpu::shown) {
@@ -2350,5 +1452,730 @@ namespace Draw {
 			select_max = height - 3;
 			box = createBox(x, y, width, height, Theme::c("proc_box"), true, "proc", "", 4);
 		}
+		
+	#ifdef AZEROTHCORE_SUPPORT
+		//* Calculate and draw AzerothCore box outlines (3-pane layout)
+		if (Draw::AzerothCore::shown) {
+			using namespace Draw::AzerothCore;
+			width = Term::width;
+			height = Term::height;
+			x = 1;
+			y = 1;
+			
+			//* Calculate layout:
+			//* Top section split: SERVER PERFORMANCE (left ~70%) | BOT DISTRIBUTION (right ~30%)
+			//* Bottom section: ZONES (full width)
+			
+			// Distribution pane has fixed width based on content requirements
+			// Content width calculation:
+			// - 1 left padding + 15 name + 2 indicator + 3 percent = 21 chars
+			// - Add 2 for borders = 23 total
+			dist_width = 23;
+			
+			// Calculate distribution pane height dynamically based on detected brackets
+			// Formula: 3 (factions) + 5 (continents) + (N+1) (levels) + 2 (borders) + 1 (spacing)
+			int num_level_brackets = ::AzerothCore::expected_values.bracket_definitions.size();
+			if (num_level_brackets == 0) num_level_brackets = 8;  // Default to 8 if not loaded yet
+			
+			// Height calculation (exact content fit):
+			// - Factions: 1 title + 2 items = 3 lines
+			// - Continents: 1 title + 4 items = 5 lines
+			// - Levels: 1 title + N items = (N+1) lines
+			// Total: 3 + 5 + (N+1) + 2 borders + 1 spacing = N + 12
+			dist_height = num_level_brackets + 12;
+			dist_x = width - dist_width + 1;
+			dist_y = y;
+			
+			// Performance pane takes remaining width on left (no gap)
+			perf_width = width - dist_width;
+			perf_height = dist_height;
+			perf_x = x;
+			perf_y = y;
+			
+			// Zones pane at bottom, full width
+			zones_height = height - perf_height;
+			zones_y = y + perf_height;
+			
+			// Create boxes
+			perf_box = createBox(perf_x, perf_y, perf_width, perf_height, Theme::c("cpu_box"), true, "server performance", "", 9);
+			dist_box = createBox(dist_x, dist_y, dist_width, dist_height, Theme::c("mem_box"), true, "bot distribution", "", 8);
+			zones_box = createBox(x, zones_y, width, zones_height, Theme::c("proc_box"), true, "zones", "", 10);
+			box = perf_box + dist_box + zones_box;
+			
+			zone_select_max = zones_height - 4;  // Account for header and borders
+			redraw = true;
+		}
+	#endif
 	}
 }
+
+#ifdef AZEROTHCORE_SUPPORT
+namespace Draw {
+	namespace AzerothCore {
+		int width_p = 100, height_p = 100;
+		int min_width = 80, min_height = 20;
+		int x = 1, y = 1, width = 80, height = 25;
+		bool shown = false, redraw = false;
+		string box;
+		
+		//* Three-pane layout (SERVER PERFORMANCE left, BOT DISTRIBUTION right, ZONES bottom)
+		int perf_width = 50, perf_height = 12;
+		int perf_x = 1, perf_y = 1;
+		int dist_width = 30, dist_height = 12;
+		int dist_x = 51, dist_y = 1;
+		int zones_height = 13;
+		int zones_y = 13;
+		string perf_box;
+		string dist_box;
+		string zones_box;
+		
+		//* Zone list scrolling and filtering
+		size_t zone_offset = 0;
+		size_t zone_select_max = 10;
+		Draw::TextEdit zone_filter;
+		
+	//* Zone selection and expansion
+	int selected_zone = 0;
+	bool zone_selection_active = false;
+	bool zone_filtering = false;
+	std::set<size_t> expanded_zones;
+	std::set<std::string> expanded_continents;  // Track which continents are expanded
+	
+	//* Zone scrolling
+	int zone_scroll_offset = 0;  // First visible line in zones list
+	
+	//* Zone sorting
+	Draw::AzerothCore::ZoneSortColumn zone_sort_column = Draw::AzerothCore::ZoneSortColumn::NONE;
+	bool zone_sort_reverse = false;
+	
+	//* Display list for zone navigation (defined in header)
+	std::vector<Draw::AzerothCore::DisplayItem> zone_display_list;
+		
+		//* Update intervals (milliseconds since epoch)
+		uint64_t last_perf_update = 0;
+		uint64_t last_dist_update = 0;
+		uint64_t last_zones_update = 0;
+		
+		//* Graph tracking
+		long long last_graph_max = 0;
+		
+		std::unordered_map<string, Draw::Graph> graphs;
+		std::unordered_map<string, Draw::Meter> meters;
+
+		string draw(bool force_redraw, [[maybe_unused]] bool data_same) {
+			try {
+				if (Runner::stopping) return "";
+				if (not shown) return "";
+				if (force_redraw) redraw = true;
+				
+				const auto& data = ::AzerothCore::current_data;
+				const auto& enabled = ::AzerothCore::enabled;
+				const auto& active = ::AzerothCore::active;
+				const auto& load_hist = ::AzerothCore::load_history;
+				
+				string out;
+				out.reserve(width * height);
+				
+				//* Redraw box outlines for all three panes
+				if (redraw or force_redraw) {
+					out += perf_box + dist_box + zones_box;
+					graphs.clear();
+					meters.clear();
+					redraw = false;
+				}
+				
+				// Get theme colors
+				string main_fg = Theme::c("main_fg");
+				string hi_fg = Theme::c("hi_fg");
+				string div_line = Theme::c("div_line");
+				string title = Theme::c("title");
+				
+				// If basic theme colors aren't loaded, skip this frame
+				if (main_fg.empty() or title.empty()) {
+					return "";
+				}
+			
+			//! ======== LEFT PANE: SERVER PERFORMANCE ========
+			int cy = perf_y + 1;
+			
+			if (!enabled) {
+				out += Mv::to(cy + 2, perf_x + 4) + main_fg + "Monitor is disabled";
+				out += Mv::to(cy + 3, perf_x + 4) + "Set azerothcore_enabled=true in config";
+				return out;
+			}
+			
+			if (!active) {
+				out += Mv::to(cy + 2, perf_x + 4) + main_fg + "Not connected to server";
+				if (!data.error.empty()) {
+					out += Mv::to(cy + 4, perf_x + 4) + hi_fg + "Error: " + main_fg + data.error;
+				}
+				return out;
+			}
+			
+			//* Blank line at top
+			cy++;
+			
+		//* Server URL - extract just hostname
+		if (!data.server_url.empty()) {
+			// Extract hostname from formats like "root@hostname.domain.com" or "hostname.domain.com"
+			string display_hostname = data.server_url;
+			
+			// Remove user@ prefix if present
+			size_t at_pos = display_hostname.find('@');
+			if (at_pos != string::npos) {
+				display_hostname = display_hostname.substr(at_pos + 1);
+			}
+			
+			// Take only first part before first dot
+			size_t dot_pos = display_hostname.find('.');
+			if (dot_pos != string::npos) {
+				display_hostname = display_hostname.substr(0, dot_pos);
+			}
+			
+			// Clear the line first to prevent ghosting
+			out += Mv::to(cy, perf_x + 2) + string(perf_width - 4, ' ');
+			out += Mv::to(cy++, perf_x + 2) + title + "Server: " + main_fg + display_hostname;
+		}
+			
+		//* Server Status (with Uptime when ONLINE)
+		using ::AzerothCore::ServerStatus;
+		// Clear the entire line first to prevent ghosting
+		out += Mv::to(cy, perf_x + 2) + string(perf_width - 4, ' ');
+		out += Mv::to(cy++, perf_x + 2) + title + "Status: ";
+		if (data.status == ServerStatus::ONLINE) {
+			out += Theme::c("proc_misc") + "ONLINE " + main_fg + "[" 
+				+ ::AzerothCore::format_uptime(data.stats.uptime_hours) + "]";
+		} else if (data.status == ServerStatus::OFFLINE) {
+			out += Theme::c("title") + "OFFLINE";
+		} else if (data.status == ServerStatus::RESTARTING) {
+			out += Theme::c("title") + "RESTARTING";
+		} else if (data.status == ServerStatus::REBUILDING) {
+			// Yellow color for REBUILDING status
+			out += string("\x1b[93mREBUILDING ") + main_fg + "[" 
+				+ to_string((int)data.rebuild_progress) + "%]";
+		} else {
+			out += Theme::c("inactive_fg") + "ERROR";
+		}
+		
+		//* Container statuses - show when not ONLINE
+		if (data.status != ServerStatus::ONLINE && !data.containers.empty()) {
+			// Blank line for spacing
+			cy++;
+			
+			// Show each container status
+			for (const auto& container : data.containers) {
+				out += Mv::to(cy, perf_x + 2) + string(perf_width - 4, ' ');
+				
+				// Color based on state
+				string state_color;
+				if (container.is_running) {
+					state_color = Theme::c("proc_misc");  // Green
+				} else if (container.state == "restarting") {
+					state_color = "\x1b[93m";  // Yellow
+				} else if (container.state == "paused") {
+					state_color = "\x1b[93m";  // Yellow
+				} else {
+					state_color = "\x1b[91m";  // Red for exited/dead
+				}
+				
+				// Format: "  worldserver: running"
+				out += Mv::to(cy++, perf_x + 4) + title + container.short_name + ": " 
+					+ state_color + container.state;
+			}
+		}
+		
+		//* Ollama stats - inline with server stats (not right-aligned anymore)
+		// Debug logging for Ollama data
+		static std::ofstream ollama_draw_log("/tmp/bottop_ollama_draw.txt", std::ios::app);
+		ollama_draw_log << "Draw function - enabled: " << data.ollama.enabled 
+		                << " rate=" << data.ollama.messages_per_hour 
+		                << " recent=" << data.ollama.recent_messages 
+		                << " failure=" << data.ollama.failure_rate_60s << std::endl;
+		ollama_draw_log.flush();
+		
+		// Ollama Status
+		out += Mv::to(cy, perf_x + 2) + string(perf_width - 4, ' ');
+		out += Mv::to(cy++, perf_x + 2) + title + "Ollama: ";
+		if (data.ollama.enabled) {
+			out += Theme::c("proc_misc") + "ENABLED";
+			
+			// Ollama messages since update (recent_messages = last 60 seconds)
+			out += Mv::to(cy, perf_x + 2) + string(perf_width - 4, ' ');
+			out += Mv::to(cy++, perf_x + 2) + title + "  Messages: " + main_fg 
+				+ to_string(data.ollama.recent_messages) + " (60s)";
+			
+			// Ollama failure rate
+			out += Mv::to(cy, perf_x + 2) + string(perf_width - 4, ' ');
+			out += Mv::to(cy++, perf_x + 2) + title + "  Failure: " + main_fg 
+				+ to_string((int)data.ollama.failure_rate_60s) + "%";
+		} else {
+			out += Theme::c("inactive_fg") + "NOT DETECTED";
+		}
+		
+	//* WorldServer Performance Metrics
+		if (data.stats.perf.available) {
+			// Clear the line first to prevent ghosting
+			out += Mv::to(cy, perf_x + 2) + string(perf_width - 4, ' ');
+			
+			// Display actual server performance from "server info" - consolidated single line
+			// Mean update time with color coding
+			string diff_color;
+			if (data.stats.perf.mean < 50) {
+				diff_color = Theme::c("proc_misc");  // Green - excellent
+			} else if (data.stats.perf.mean < 100) {
+				diff_color = "\x1b[92m";  // Light green - good
+			} else if (data.stats.perf.mean < 150) {
+				diff_color = "\x1b[93m";  // Yellow - acceptable
+			} else {
+				diff_color = "\x1b[91m";  // Red - poor
+			}
+			
+			// Format: "WorldServer UpdateTime: XXms [Mean]" or "WorldServer UpdateTime: XXms [Cached Mean]"
+			// Pad [Mean] with spaces to match [Cached Mean] length to prevent overlap
+			string metric_type = data.stats.perf.is_cached ? "[Cached Mean]" : "[Mean]       ";
+			
+			out += Mv::to(cy++, perf_x + 2) + title + "WorldServer UpdateTime: " 
+				+ diff_color + to_string(data.stats.perf.mean) + "ms " 
+				+ Theme::c("graph_text") + metric_type;
+		}
+	
+	//* Response time bar graph area - display as vertical bars
+	int graph_height = perf_height - (cy - perf_y) - 2;  // Reserve 2 lines at bottom for padding
+	int scale_width = 6;  // Width for scale labels (e.g., "100ms")
+	int graph_width = perf_width - 4 - scale_width;
+	
+	// Clear the graph area to prevent ghosting
+	for (int clear_line = 0; clear_line < graph_height; clear_line++) {
+		out += Mv::to(cy + clear_line, perf_x + 2) + string(perf_width - 4, ' ');
+	}
+		
+		if (load_hist.size() > 1 and graph_height > 0 and graph_width > 0) {
+			// Fixed max value at 150ms for consistent scale
+			const long long max_val = 150;
+				
+				// Only recreate graph if it doesn't exist
+				bool need_recreate = not graphs.contains("load") or last_graph_max != max_val;
+				
+				if (need_recreate) {
+					try {
+						// Fixed 150ms max - values above will be clamped
+						graphs["load"] = Draw::Graph(graph_width, graph_height, "cpu", load_hist, "braille", false, true, max_val);
+						last_graph_max = max_val;
+					} catch (const std::exception& e) {
+						try {
+							graphs["load"] = Draw::Graph(graph_width, graph_height, "", load_hist, "braille", false, true, max_val);
+							last_graph_max = max_val;
+						} catch (...) {
+							out += Mv::to(cy, perf_x + 4) + Theme::c("inactive_fg") + "Graph init error";
+							cy++;
+							goto skip_graph;
+						}
+					}
+				}
+				
+				try {
+					// Draw scale on the left and graph on the right
+					string graph_out = graphs["load"](load_hist, data_same and not need_recreate);
+					auto graph_lines = ssplit(graph_out, '\n');
+					
+				// Draw scale labels and graph lines
+				// Avoid division by zero
+				int safe_height = max(graph_height - 1, 1);
+				for (int i = 0; i < min((int)graph_lines.size(), graph_height); i++) {
+					// Calculate the value for this line (top = max, bottom = 0)
+					long long scale_val = max_val * (graph_height - i - 1) / safe_height;
+					string scale_label = to_string(scale_val) + "ms";
+					
+					// Draw scale label in dark grey (right-aligned) and graph line
+					out += Mv::to(cy + i, perf_x + 2) 
+						+ Theme::c("inactive_fg") + rjust(scale_label, scale_width - 1) + " "
+						+ graph_lines[i];
+				}
+				cy += graph_height;
+				} catch (const std::exception& e) {
+					out += Mv::to(cy, perf_x + 4) + Theme::c("inactive_fg") + "Graph error: " + string(e.what());
+					cy++;
+				}
+			} else {
+				out += Mv::to(cy, perf_x + 4) + Theme::c("inactive_fg") + "Collecting data...";
+				cy++;
+		}
+		skip_graph:
+		
+	//! ======== RIGHT PANE: BOT DISTRIBUTION ========
+	int dist_cy = dist_y + 1;
+	
+	// Clear the entire distribution pane to prevent ghosting
+	for (int clear_line = 0; clear_line < dist_height - 2; clear_line++) {
+		out += Mv::to(dist_y + 1 + clear_line, dist_x + 1) + string(dist_width - 2, ' ');
+	}
+		
+		// Faction distribution - colored text only, no bars
+		if (!data.factions.empty() and dist_cy < dist_y + dist_height - 1) {
+			out += Mv::to(dist_cy++, dist_x + 1) + title + "Factions:";
+			for (const auto& faction : data.factions) {
+				if (dist_cy >= dist_y + dist_height - 1) break;
+				
+				// Color: Red for Horde, Blue for Alliance
+				string faction_color;
+				if (faction.name == "Horde") {
+					faction_color = "\x1b[38;2;220;20;60m";  // Red (RGB: 220, 20, 60 - Crimson)
+				} else if (faction.name == "Alliance") {
+					faction_color = "\x1b[38;2;0;120;255m";  // Blue (RGB: 0, 120, 255)
+				} else {
+					faction_color = Theme::c("hi_fg");  // Default color for others
+				}
+				
+				string percent_str = to_string((int)faction.percent) + "%";
+				out += Mv::to(dist_cy, dist_x + 1) + faction_color + ljust(faction.name, 15);
+				out += faction_color + rjust(percent_str, 4);
+				dist_cy++;
+			}
+		}
+			
+			// Continent distribution - text only, no bars
+			if (!data.continents.empty() and dist_cy < dist_y + dist_height - 1) {
+				out += Mv::to(dist_cy++, dist_x + 1) + title + "Continents:";
+				for (const auto& continent : data.continents) {
+					if (dist_cy >= dist_y + dist_height - 1) break;
+					
+					string percent_str = to_string((int)continent.percent) + "%";
+					out += Mv::to(dist_cy, dist_x + 1) + Theme::c("inactive_fg") + ljust(continent.name, 15);
+					out += main_fg + rjust(percent_str, 4);
+					dist_cy++;
+				}
+			}
+			
+			// Level distribution (compact) - show ALL brackets even if empty
+			if (!data.levels.empty() and dist_cy < dist_y + dist_height - 1) {
+				out += Mv::to(dist_cy++, dist_x + 1) + title + "Levels:";
+				
+				// Get bracket definitions from loaded config (or use defaults)
+				const auto& bracket_defs = ::AzerothCore::expected_values.bracket_definitions;
+				
+				// If no brackets loaded yet, use defaults
+				std::vector<std::string> bracket_names;
+				if (bracket_defs.empty()) {
+					bracket_names = {"1-10", "11-20", "21-30", "31-40", "41-50", "51-60", "61-70", "71-80"};
+				} else {
+					for (const auto& def : bracket_defs) {
+						bracket_names.push_back(def.range);
+					}
+				}
+				
+				// Display all brackets in order
+				for (const auto& bracket_name : bracket_names) {
+					if (dist_cy >= dist_y + dist_height - 1) break;
+					
+					// Find this bracket in the data
+					auto it = std::find_if(data.levels.begin(), data.levels.end(),
+						[&bracket_name](const auto& lb) { return lb.range == bracket_name; });
+		
+		double percent = (it != data.levels.end()) ? it->percent : 0.0;
+		
+		// Find expected percentage from server config for color indicator
+		double expected_percent = 0.0;
+		bool has_expected = false;
+		if (::AzerothCore::expected_values.loaded) {
+			auto exp_it = std::find_if(::AzerothCore::expected_values.level_distribution.begin(),
+			                            ::AzerothCore::expected_values.level_distribution.end(),
+			                            [&bracket_name](const auto& lb) { return lb.range == bracket_name; });
+			if (exp_it != ::AzerothCore::expected_values.level_distribution.end()) {
+				expected_percent = exp_it->percent;
+				has_expected = true;
+			}
+		}
+		
+		// 3-tier color system based on deviation from expected
+		// Green: ±0-3% (on target)
+		// Yellow: ±3-6% (warning)
+		// Red: ±6-9%+ (critical)
+		string line_color = Theme::c("inactive_fg");  // Default grey
+		if (has_expected && expected_percent > 0) {
+			double deviation = abs(percent - expected_percent);
+			
+			if (deviation <= 3.0) {
+				// Green - on target (±3%)
+				line_color = Theme::c("proc_misc");  // Bright green
+			} else if (deviation <= 6.0) {
+				// Yellow - warning (±6%)
+				line_color = Theme::c("available_end");  // Bright yellow/orange
+			} else if (deviation <= 9.0) {
+				// Red - critical (±9%)
+				line_color = Theme::c("used_end");  // Bright red
+			} else {
+				// Beyond 9% - use title color (bright white) to indicate severe deviation
+				line_color = Theme::c("title");
+			}
+		}
+		
+		string bracket_str = ljust(bracket_name, 13);
+		string percent_str = to_string((int)percent) + "%";
+		
+		out += Mv::to(dist_cy, dist_x + 1) + line_color + bracket_str;
+		out += line_color + rjust(percent_str, 4);
+		dist_cy++;
+	}
+}
+			
+	//! ======== BOTTOM PANE: ZONES ========
+	cy = zones_y + 1;
+	
+	// Clear the entire zones pane to prevent ghosting
+	for (int clear_line = 0; clear_line < zones_height - 2; clear_line++) {
+		out += Mv::to(zones_y + 1 + clear_line, x + 1) + string(width - 2, ' ');
+	}
+	cy = zones_y + 1;  // Reset cy after clearing
+	
+	//* Auto-expand all continents on first run
+	static bool first_run = true;
+	if (first_run && !data.zones.empty()) {
+		for (const auto& zone : data.zones) {
+			expanded_continents.insert(zone.continent);
+		}
+		first_run = false;
+	}
+	
+	//* Create sorted index vector for zones
+	std::vector<size_t> sorted_indices(data.zones.size());
+	for (size_t i = 0; i < data.zones.size(); i++) {
+		sorted_indices[i] = i;
+	}
+		
+	// Sort indices based on current sort column
+	std::sort(sorted_indices.begin(), sorted_indices.end(), [&data](size_t a_idx, size_t b_idx) {
+		const auto& a = data.zones[a_idx];
+		const auto& b = data.zones[b_idx];
+		
+		int result = 0;
+		
+		// Primary sort: expected level bracket (if no column sort active)
+		if (zone_sort_column == Draw::AzerothCore::ZoneSortColumn::NONE) {
+			// Sort by expected_min first
+			if (a.expected_min != b.expected_min) {
+				result = (a.expected_min < b.expected_min) ? -1 : 1;
+			}
+			// If expected_min is same, sort by expected_max
+			else if (a.expected_max != b.expected_max) {
+				result = (a.expected_max < b.expected_max) ? -1 : 1;
+			}
+			// If both levels same, sort by name
+			else {
+				result = a.name.compare(b.name);
+			}
+		}
+		// Column sort (when user has selected a column)
+		else {
+			switch (zone_sort_column) {
+				case Draw::AzerothCore::ZoneSortColumn::NAME:
+					result = a.name.compare(b.name);
+					break;
+				case Draw::AzerothCore::ZoneSortColumn::BOTS:
+					result = (a.total < b.total) ? -1 : (a.total > b.total) ? 1 : 0;
+					break;
+				case Draw::AzerothCore::ZoneSortColumn::MIN_LEVEL:
+					result = (a.expected_min < b.expected_min) ? -1 : (a.expected_min > b.expected_min) ? 1 : 0;
+					break;
+				case Draw::AzerothCore::ZoneSortColumn::MAX_LEVEL:
+					result = (a.expected_max < b.expected_max) ? -1 : (a.expected_max > b.expected_max) ? 1 : 0;
+					break;
+				case Draw::AzerothCore::ZoneSortColumn::ALIGNMENT:
+					result = (a.alignment < b.alignment) ? -1 : (a.alignment > b.alignment) ? 1 : 0;
+					break;
+				case Draw::AzerothCore::ZoneSortColumn::NONE:
+					// Already handled above
+					break;
+			}
+			
+			// Apply reverse sort if enabled (only for column sorts)
+			if (zone_sort_reverse) {
+				result = -result;
+			}
+			
+			// Tertiary sort: if column result is tied, fall back to level bracket
+			if (result == 0) {
+				// Sort by expected_min first
+				if (a.expected_min != b.expected_min) {
+					result = (a.expected_min < b.expected_min) ? -1 : 1;
+				}
+				// If expected_min is same, sort by expected_max
+				else if (a.expected_max != b.expected_max) {
+					result = (a.expected_max < b.expected_max) ? -1 : 1;
+				}
+				// If both levels same, sort by name
+				else {
+					result = a.name.compare(b.name);
+				}
+			}
+		}
+		
+		return result < 0;
+	});
+		
+	//* Calculate total bots across all zones
+	int total_bots = 0;
+	std::unordered_map<string, int> continent_totals;
+	for (const auto& zone : data.zones) {
+		total_bots += zone.total;
+		continent_totals[zone.continent] += zone.total;
+	}
+	
+	//* Build display list for navigation using sorted indices
+	zone_display_list.clear();
+	string prep_continent = "";
+	string prep_region = "";
+	string filter_text_lower = zone_filter.text;
+	std::transform(filter_text_lower.begin(), filter_text_lower.end(), filter_text_lower.begin(), ::tolower);
+	
+for (size_t sorted_idx = 0; sorted_idx < sorted_indices.size(); sorted_idx++) {
+	size_t orig_idx = sorted_indices[sorted_idx];
+	const auto& zone = data.zones[orig_idx];
+	
+	// Apply filter if active
+	bool zone_matches_filter = true;
+	if (!filter_text_lower.empty()) {
+		string zone_name_lower = zone.name;
+		std::transform(zone_name_lower.begin(), zone_name_lower.end(), zone_name_lower.begin(), ::tolower);
+		if (zone_name_lower.find(filter_text_lower) == string::npos) {
+			zone_matches_filter = false;
+		}
+	}
+	
+	// Skip zones that don't match filter
+	if (!zone_matches_filter) {
+		continue;
+	}
+	
+	// Simply add the zone to the display list (no continent/region grouping)
+	zone_display_list.push_back({Draw::AzerothCore::DisplayItem::ZONE, orig_idx, zone.name});
+	}
+			
+		// Clamp selected zone to display list bounds
+		if (selected_zone >= (int)zone_display_list.size()) {
+			selected_zone = max(0, (int)zone_display_list.size() - 1);
+		}
+		
+		//* Header with sort indicators
+		string sort_indicator = zone_sort_reverse ? "▲" : "▼";
+		string name_sort = (zone_sort_column == Draw::AzerothCore::ZoneSortColumn::NAME) ? " " + sort_indicator : "";
+		string bots_sort = (zone_sort_column == Draw::AzerothCore::ZoneSortColumn::BOTS) ? " " + sort_indicator : "";
+	string min_lvl_sort = (zone_sort_column == Draw::AzerothCore::ZoneSortColumn::MIN_LEVEL) ? " " + sort_indicator : "";
+	string max_lvl_sort = (zone_sort_column == Draw::AzerothCore::ZoneSortColumn::MAX_LEVEL) ? " " + sort_indicator : "";
+	string align_sort = (zone_sort_column == Draw::AzerothCore::ZoneSortColumn::ALIGNMENT) ? " " + sort_indicator : "";
+	
+	// Use combined sort indicator for expected levels (if either min or max level is being sorted)
+	string expected_sort = (zone_sort_column == Draw::AzerothCore::ZoneSortColumn::MIN_LEVEL || 
+	                        zone_sort_column == Draw::AzerothCore::ZoneSortColumn::MAX_LEVEL) ? " " + sort_indicator : "";
+	
+	// Column layout: Name (30) | Bots (6) | Expected (10) | Min Lvl (4) | Max Lvl (4) | Align (5)
+	out += Mv::to(cy, x + 2) + title + "Name" + name_sort;
+	out += Mv::to(cy, x + 34) + title + "Bots" + bots_sort;
+	out += Mv::to(cy, x + 44) + "Expected" + expected_sort;
+	out += Mv::to(cy, x + 57) + "Min";
+	out += Mv::to(cy, x + 64) + "Max";
+	out += Mv::to(cy, x + 71) + "Align" + align_sort;
+	cy++;
+	out += Mv::to(cy, x + 2) + div_line + Symbols::h_line * (width - 4);
+	cy++;
+	
+	//* All zones total line
+	out += Mv::to(cy, x + 2) + Theme::c("title") + "All Zones:";
+	out += Mv::to(cy, x + 34) + Theme::c("hi_fg") + rjust(to_string(total_bots), 6);
+	cy++;
+		
+			//* Zone list (hierarchical by Continent > Region > Zone)
+			if (!data.zones.empty() && !zone_display_list.empty()) {
+				int displayed_rows = 0;
+				size_t list_height = zone_select_max;
+				
+				// Adjust scroll offset to keep selected item visible
+				if (zone_selection_active) {
+					// If selected item is above visible area, scroll up
+					if (selected_zone < zone_scroll_offset) {
+						zone_scroll_offset = selected_zone;
+					}
+					// If selected item is below visible area, scroll down
+					else if (selected_zone >= zone_scroll_offset + (int)list_height) {
+						zone_scroll_offset = selected_zone - (int)list_height + 1;
+					}
+				}
+				
+				// Clamp scroll offset
+				int max_scroll = max(0, (int)zone_display_list.size() - (int)list_height);
+				zone_scroll_offset = clamp(zone_scroll_offset, 0, max_scroll);
+				
+				for (size_t display_idx = zone_scroll_offset; display_idx < zone_display_list.size(); display_idx++) {
+					// Check if we have room to display
+					if (cy >= zones_y + zones_height - 2) break;
+					if (displayed_rows >= (int)list_height) break;
+					
+					const auto& item = zone_display_list[display_idx];
+					bool is_selected = zone_selection_active && (int)display_idx == selected_zone;
+					
+				// Only render zones (no continent/region headers)
+				if (item.type == Draw::AzerothCore::DisplayItem::ZONE) {
+					const auto& zone = data.zones[item.zone_index];
+					
+					string health_color = zone.is_healthy() ? Theme::c("proc_misc") : Theme::c("title");
+					string status_icon = zone.is_healthy() ? "●" : "⚠";
+					string selection_indicator = is_selected ? "► " : "  ";
+					string row_fg = is_selected ? Theme::c("hi_fg") : main_fg;
+					
+					// Format expected level range as "min-max"
+					string expected_range = to_string(zone.expected_min) + "-" + to_string(zone.expected_max);
+					
+					// Color actual levels based on whether they match expected
+					string min_color = (zone.actual_min < zone.expected_min || zone.actual_min > zone.expected_max) ? 
+					                   Theme::c("inactive_fg") : row_fg;
+					string max_color = (zone.actual_max < zone.expected_min || zone.actual_max > zone.expected_max) ? 
+					                   Theme::c("inactive_fg") : row_fg;
+					
+					out += Mv::to(cy, x + 2);
+					out += row_fg + selection_indicator;
+					out += health_color + status_icon + " ";
+					out += row_fg + ljust(zone.name, 28);
+					out += Mv::to(cy, x + 34) + row_fg + rjust(to_string(zone.total), 6);
+					out += Mv::to(cy, x + 44) + (is_selected ? row_fg : Theme::c("inactive_fg")) + rjust(expected_range, 10);
+					out += Mv::to(cy, x + 57) + min_color + rjust(to_string(zone.actual_min), 3);
+					out += Mv::to(cy, x + 64) + max_color + rjust(to_string(zone.actual_max), 3);
+					out += Mv::to(cy, x + 71) + (zone.alignment >= 80.0 ? Theme::c("proc_misc") 
+						: zone.alignment >= 60.0 ? row_fg 
+						: Theme::c("title")) 
+						+ rjust(to_string((int)zone.alignment), 3) + "%";
+					cy++;
+					displayed_rows++;
+				}
+				}
+				
+			// Navigation help (clear bottom line first to prevent ghosting)
+			out += Mv::to(zones_y + zones_height - 1, x + 1) + string(width - 2, ' ');
+			if (zone_filtering) {
+				// Show filter input box
+				out += Mv::to(zones_y + zones_height - 1, x + 2) + Theme::c("hi_fg") 
+					+ "Filter: " + zone_filter.text + "_";
+			}
+		else if (zone_selection_active) {
+			out += Mv::to(zones_y + zones_height - 1, x + 2) + Theme::c("hi_fg") 
+				+ "↑↓:Nav  PgUp/PgDn:FastScroll  Home/End:Jump  n/b/m/M/a:Sort  r:Reverse  f:Filter";
+		} else {
+				out += Mv::to(zones_y + zones_height - 1, x + 2) + Theme::c("graph_text") 
+					+ "Arrow keys to navigate zones";
+			}
+			} else {
+				out += Mv::to(cy, x + 4) + Theme::c("inactive_fg") + "No zones found";
+			}
+			
+			//* Timestamp
+			if (!data.timestamp.empty()) {
+				out += Mv::to(zones_y + zones_height - 1, x + width - 20) + Theme::c("graph_text") + data.timestamp;
+			}
+			
+			return out;
+			} catch (const std::exception& e) {
+				Logger::error("AzerothCore::draw() -> " + string(e.what()));
+				return "";
+			}
+		}
+	}
+}
+#endif

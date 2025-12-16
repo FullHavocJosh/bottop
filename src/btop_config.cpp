@@ -43,7 +43,7 @@ namespace rng = std::ranges;
 using namespace std::literals;
 using namespace Tools;
 
-//* Functions and variables for reading and writing the btop config file
+//* Functions and variables for reading and writing the bottop config file
 namespace Config {
 
 	atomic<bool> locked (false);
@@ -51,8 +51,8 @@ namespace Config {
 	bool write_new;
 
 	const vector<array<string, 2>> descriptions = {
-		{"color_theme", 		"#* Name of a btop++/bpytop/bashtop formatted \".theme\" file, \"Default\" and \"TTY\" for builtin themes.\n"
-								"#* Themes should be placed in \"../share/btop/themes\" relative to binary or \"$HOME/.config/btop/themes\""},
+		{"color_theme", 		"#* Name of a bottop formatted \".theme\" file, \"Default\" and \"TTY\" for builtin themes.\n"
+								"#* Themes should be placed in \"../share/bottop/themes\" relative to binary or \"$HOME/.config/bottop/themes\""},
 
 		{"theme_background", 	"#* If the theme set background should be shown, set to False if you want terminal background transparency."},
 
@@ -89,7 +89,8 @@ namespace Config {
 
 		{"graph_symbol_proc", 	"# Graph symbol to use for graphs in cpu box, \"default\", \"braille\", \"block\" or \"tty\"."},
 
-		{"shown_boxes", 		"#* Manually set which boxes to show. Available values are \"cpu mem net proc\" and \"gpu0\" through \"gpu5\", separate values with whitespace."},
+		{"shown_boxes", 		"#* Manually set which boxes to show. Available values are \"azerothcore cpu mem net proc\" and \"gpu0\" through \"gpu5\", separate values with whitespace.\n"
+								"#* Default is \"azerothcore\" to show only remote AzerothCore monitoring. Add \"cpu mem net proc\" to enable local system monitoring."},
 
 		{"update_ms", 			"#* Update time in milliseconds, recommended 2000 ms or above for better sample times for graphs."},
 
@@ -126,116 +127,53 @@ namespace Config {
 		{"cpu_graph_lower", 	"#* Sets the CPU stat shown in lower half of the CPU graph, \"total\" is always available.\n"
 								"#* Select from a list of detected attributes from the options menu."},
 	#ifdef GPU_SUPPORT
-		{"show_gpu_info",		"#* If gpu info should be shown in the cpu box. Available values = \"Auto\", \"On\" and \"Off\"."},
-	#endif
-		{"cpu_invert_lower", 	"#* Toggles if the lower CPU graph should be inverted."},
-
-		{"cpu_single_graph", 	"#* Set to True to completely disable the lower CPU graph."},
-
-		{"cpu_bottom",			"#* Show cpu box at bottom of screen instead of top."},
-
-		{"show_uptime", 		"#* Shows the system uptime in the CPU box."},
-
-		{"show_cpu_watts",		"#* Shows the CPU package current power consumption in watts. Requires running `make setcap` or `make setuid` or running with sudo."},
-
-		{"check_temp", 			"#* Show cpu temperature."},
-
-		{"cpu_sensor", 			"#* Which sensor to use for cpu temperature, use options menu to select from list of available sensors."},
-
-		{"show_coretemp", 		"#* Show temperatures for cpu cores also if check_temp is True and sensors has been found."},
-
-		{"cpu_core_map",		"#* Set a custom mapping between core and coretemp, can be needed on certain cpus to get correct temperature for correct core.\n"
-								"#* Use lm-sensors or similar to see which cores are reporting temperatures on your machine.\n"
-								"#* Format \"x:y\" x=core with wrong temp, y=core with correct temp, use space as separator between multiple entries.\n"
-								"#* Example: \"4:0 5:1 6:3\""},
-
-		{"temp_scale", 			"#* Which temperature scale to use, available values: \"celsius\", \"fahrenheit\", \"kelvin\" and \"rankine\"."},
-
-		{"base_10_sizes",		"#* Use base 10 for bits/bytes sizes, KB = 1000 instead of KiB = 1024."},
-
-		{"show_cpu_freq", 		"#* Show CPU frequency."},
-	#ifdef __linux__
-		{"freq_mode",				"#* How to calculate CPU frequency, available values: \"first\", \"range\", \"lowest\", \"highest\" and \"average\"."},
-	#endif
-		{"clock_format", 		"#* Draw a clock at top of screen, formatting according to strftime, empty string to disable.\n"
-								"#* Special formatting: /host = hostname | /user = username | /uptime = system uptime"},
-
-		{"background_update", 	"#* Update main ui in background when menus are showing, set this to false if the menus is flickering too much for comfort."},
-
-		{"custom_cpu_name", 	"#* Custom cpu model name, empty string to disable."},
-
-		{"disks_filter", 		"#* Optional filter for shown disks, should be full path of a mountpoint, separate multiple values with whitespace \" \".\n"
-									"#* Only disks matching the filter will be shown. Prepend exclude= to only show disks not matching the filter. Examples: disk_filter=\"/boot /home/user\", disks_filter=\"exclude=/boot /home/user\""},
-
-		{"mem_graphs", 			"#* Show graphs instead of meters for memory values."},
-
-		{"mem_below_net",		"#* Show mem box below net box instead of above."},
-
-		{"zfs_arc_cached",		"#* Count ZFS ARC in cached and available memory."},
-
-		{"show_swap", 			"#* If swap memory should be shown in memory box."},
-
-		{"swap_disk", 			"#* Show swap as a disk, ignores show_swap value above, inserts itself after first disk."},
-
-		{"show_disks", 			"#* If mem box should be split to also show disks info."},
-
-		{"only_physical", 		"#* Filter out non physical disks. Set this to False to include network disks, RAM disks and similar."},
-
-		{"use_fstab", 			"#* Read disks list from /etc/fstab. This also disables only_physical."},
-
-		{"zfs_hide_datasets",		"#* Setting this to True will hide all datasets, and only show ZFS pools. (IO stats will be calculated per-pool)"},
-
-		{"disk_free_priv",		"#* Set to true to show available disk space for privileged users."},
-
-		{"show_io_stat", 		"#* Toggles if io activity % (disk busy time) should be shown in regular disk usage view."},
-
-		{"io_mode", 			"#* Toggles io mode for disks, showing big graphs for disk read/write speeds."},
-
-		{"io_graph_combined", 	"#* Set to True to show combined read/write io graphs in io mode."},
-
-		{"io_graph_speeds", 	"#* Set the top speed for the io graphs in MiB/s (100 by default), use format \"mountpoint:speed\" separate disks with whitespace \" \".\n"
-								"#* Example: \"/mnt/media:100 /:20 /boot:1\"."},
-
-		{"net_download", 		"#* Set fixed values for network graphs in Mebibits. Is only used if net_auto is also set to False."},
-
-		{"net_upload", ""},
-
-		{"net_auto", 			"#* Use network graphs auto rescaling mode, ignores any values set above and rescales down to 10 Kibibytes at the lowest."},
-
-		{"net_sync", 			"#* Sync the auto scaling for download and upload to whichever currently has the highest scale."},
-
-		{"net_iface", 			"#* Starts with the Network Interface specified here."},
-
-	    {"base_10_bitrate",     "#* \"True\" shows bitrates in base 10 (Kbps, Mbps). \"False\" shows bitrates in binary sizes (Kibps, Mibps, etc.). \"Auto\" uses base_10_sizes."},
-
-		{"show_battery", 		"#* Show battery stats in top right if battery is present."},
-
-		{"selected_battery",	"#* Which battery to use if multiple are present. \"Auto\" for auto detection."},
-
-		{"show_battery_watts",	"#* Show power stats of battery next to charge indicator."},
-
-		{"log_level", 			"#* Set loglevel for \"~/.config/btop/btop.log\" levels are: \"ERROR\" \"WARNING\" \"INFO\" \"DEBUG\".\n"
-								"#* The level set includes all lower levels, i.e. \"DEBUG\" will show all logging info."},
-	#ifdef GPU_SUPPORT
-
-		{"nvml_measure_pcie_speeds",
-								"#* Measure PCIe throughput on NVIDIA cards, may impact performance on certain cards."},
-		{"rsmi_measure_pcie_speeds",
-								"#* Measure PCIe throughput on AMD cards, may impact performance on certain cards."},
-		{"gpu_mirror_graph",	"#* Horizontally mirror the GPU graph."},
-		{"shown_gpus",			"#* Set which GPU vendors to show. Available values are \"nvidia amd intel\""},
-		{"custom_gpu_name0",	"#* Custom gpu0 model name, empty string to disable."},
-		{"custom_gpu_name1",	"#* Custom gpu1 model name, empty string to disable."},
-		{"custom_gpu_name2",	"#* Custom gpu2 model name, empty string to disable."},
-		{"custom_gpu_name3",	"#* Custom gpu3 model name, empty string to disable."},
-		{"custom_gpu_name4",	"#* Custom gpu4 model name, empty string to disable."},
 		{"custom_gpu_name5",	"#* Custom gpu5 model name, empty string to disable."},
+	#endif
+	#ifdef AZEROTHCORE_SUPPORT
+		{"azerothcore_ssh_host",	"#* SSH host for AzerothCore monitoring (format: user@hostname[:port]).\n"
+									"#* Can be set via environment variable: BOTTOP_AC_SSH_HOST"},
+		{"azerothcore_db_host",		"#* Database host for AzerothCore monitoring.\n"
+									"#* Can be set via environment variable: BOTTOP_AC_DB_HOST"},
+		{"azerothcore_db_user",		"#* Database username for AzerothCore monitoring.\n"
+									"#* Can be set via environment variable: BOTTOP_AC_DB_USER"},
+		{"azerothcore_db_pass",		"#* Database password for AzerothCore monitoring.\n"
+									"#* SECURITY: Recommended to set via environment variable: BOTTOP_AC_DB_PASS"},
+		{"azerothcore_db_name",		"#* Database name for AzerothCore monitoring.\n"
+									"#* Can be set via environment variable: BOTTOP_AC_DB_NAME"},
+		{"azerothcore_container",	"#* Docker container name for AzerothCore server.\n"
+									"#* Can be set via environment variable: BOTTOP_AC_CONTAINER"},
+		{"azerothcore_ra_username",	"#* RA (Remote Administrator) username for WorldServer console access.\n"
+									"#* Account must have GM level 3 or higher.\n"
+									"#* Can be set via environment variable: BOTTOP_AC_RA_USERNAME"},
+		{"azerothcore_ra_password",	"#* RA (Remote Administrator) password for WorldServer console access.\n"
+									"#* SECURITY: Recommended to set via environment variable: BOTTOP_AC_RA_PASSWORD"},
+		{"azerothcore_config_path",	"#* Path to worldserver.conf on remote server for expected values (optional)."},
 	#endif
 	};
 
+	//? ============================================================================
+	//? BOTTOP NOTE: Config Options Status
+	//? ============================================================================
+	//? Most config options below are inherited from btop++ and are now UNUSED in bottop
+	//? because all stock monitoring boxes (CPU/GPU/MEM/NET/PROC) have been disabled.
+	//? 
+	//? USED in bottop:
+	//?   - color_theme, shown_boxes, graph_symbol, clock_format, log_level
+	//?   - vim_keys, tty_mode, force_tty, lowcolor, rounded_corners
+	//?   - theme_background, truecolor, show_uptime, background_update
+	//?   - azerothcore_* (all AzerothCore-specific options)
+	//?
+	//? UNUSED in bottop (kept for compatibility, no effect):
+	//?   - All CPU options (cpu_*, show_cpu_*, custom_cpu_name, etc.)
+	//?   - All GPU options (gpu_*, custom_gpu_name*, show_gpu_info, etc.)
+	//?   - All MEM options (mem_*, show_swap, swap_disk, show_disks, etc.)
+	//?   - All NET options (net_*, base_10_bitrate, etc.)
+	//?   - All PROC options (proc_*, selected_*, show_detailed, etc.)
+	//? ============================================================================
+
 	std::unordered_map<std::string_view, string> strings = {
 		{"color_theme", "Default"},
-		{"shown_boxes", "cpu mem net proc"},
+		{"shown_boxes", "azerothcore"},
 		{"graph_symbol", "braille"},
 		{"presets", "cpu:1:default,proc:0:default cpu:0:default,mem:0:default,net:0:default cpu:0:block,net:0:tty"},
 		{"graph_symbol_cpu", "default"},
@@ -271,7 +209,18 @@ namespace Config {
 		{"custom_gpu_name4", ""},
 		{"custom_gpu_name5", ""},
 		{"show_gpu_info", "Auto"},
-		{"shown_gpus", "nvidia amd intel"}
+		{"shown_gpus", "nvidia amd intel"},
+	#endif
+	#ifdef AZEROTHCORE_SUPPORT
+		{"azerothcore_ssh_host", ""},
+		{"azerothcore_db_host", ""},
+		{"azerothcore_db_user", ""},
+		{"azerothcore_db_pass", ""},
+		{"azerothcore_db_name", "acore_characters"},
+		{"azerothcore_container", ""},
+		{"azerothcore_ra_username", ""},
+		{"azerothcore_ra_password", ""},
+		{"azerothcore_config_path", ""}
 	#endif
 	};
 	std::unordered_map<std::string_view, string> stringsTmp;
@@ -331,12 +280,15 @@ namespace Config {
 		{"rsmi_measure_pcie_speeds", true},
 		{"gpu_mirror_graph", true},
 	#endif
+	#ifdef AZEROTHCORE_SUPPORT
+		{"azerothcore_enabled", true},
+	#endif
 		{"terminal_sync", true}
 	};
 	std::unordered_map<std::string_view, bool> boolsTmp;
 
 	std::unordered_map<std::string_view, int> ints = {
-		{"update_ms", 2000},
+		{"update_ms", 30000},
 		{"net_download", 100},
 		{"net_upload", 100},
 		{"detailed_pid", 0},
@@ -356,12 +308,12 @@ namespace Config {
 			std::error_code error;
 			if (const auto xdg_config_home = std::getenv("XDG_CONFIG_HOME"); xdg_config_home != nullptr) {
 				if (fs::exists(xdg_config_home, error)) {
-					config_dir = fs::path(xdg_config_home) / "btop";
+					config_dir = fs::path(xdg_config_home) / "bottop";
 				}
 			} else if (const auto home = std::getenv("HOME"); home != nullptr) {
 				error.clear();
 				if (fs::exists(home, error)) {
-					config_dir = fs::path(home) / ".config" / "btop";
+					config_dir = fs::path(home) / ".config" / "bottop";
 				}
 				if (error) {
 					fmt::print(stderr, "\033[0;31mWarning: \033[0m{} could not be accessed: {}\n", config_dir.string(), error.message());
@@ -668,7 +620,10 @@ namespace Config {
 	bool set_boxes(const string& boxes) {
 		auto new_boxes = ssplit(boxes);
 		for (auto& box : new_boxes) {
-			if (not v_contains(valid_boxes, box)) return false;
+			if (not v_contains(valid_boxes, box)) {
+				Logger::debug("set_boxes: Invalid box name: " + box);
+				return false;
+			}
 		#ifdef GPU_SUPPORT
 			if (box.starts_with("gpu")) {
 				int gpu_num = stoi(box.substr(3)) + 1;
@@ -677,6 +632,10 @@ namespace Config {
 		#endif
 		}
 		current_boxes = std::move(new_boxes);
+		Logger::debug("set_boxes: Successfully set boxes to: " + boxes);
+		for (const auto& b : current_boxes) {
+			Logger::debug("  - Box: " + b);
+		}
 		return true;
 	}
 
@@ -705,12 +664,45 @@ namespace Config {
 		return true;
 	}
 
+	void load_env_overrides() {
+		// Load sensitive settings from environment variables
+		// This allows keeping passwords out of config files
+		#ifdef AZEROTHCORE_SUPPORT
+		if (const char* env_val = std::getenv("BOTTOP_AC_DB_PASS")) {
+			strings["azerothcore_db_pass"] = env_val;
+		}
+		if (const char* env_val = std::getenv("BOTTOP_AC_DB_USER")) {
+			strings["azerothcore_db_user"] = env_val;
+		}
+		if (const char* env_val = std::getenv("BOTTOP_AC_SSH_HOST")) {
+			strings["azerothcore_ssh_host"] = env_val;
+		}
+		if (const char* env_val = std::getenv("BOTTOP_AC_DB_HOST")) {
+			strings["azerothcore_db_host"] = env_val;
+		}
+		if (const char* env_val = std::getenv("BOTTOP_AC_DB_NAME")) {
+			strings["azerothcore_db_name"] = env_val;
+		}
+		if (const char* env_val = std::getenv("BOTTOP_AC_CONTAINER")) {
+			strings["azerothcore_container"] = env_val;
+		}
+		if (const char* env_val = std::getenv("BOTTOP_AC_RA_USERNAME")) {
+			strings["azerothcore_ra_username"] = env_val;
+		}
+		if (const char* env_val = std::getenv("BOTTOP_AC_RA_PASSWORD")) {
+			strings["azerothcore_ra_password"] = env_val;
+		}
+		#endif
+	}
+
 	void load(const fs::path& conf_file, vector<string>& load_warnings) {
 		std::error_code error;
 		if (conf_file.empty())
 			return;
 		else if (not fs::exists(conf_file, error)) {
 			write_new = true;
+			// Load environment variables even if config file doesn't exist
+			load_env_overrides();
 			return;
 		}
 		if (error) {
@@ -775,6 +767,10 @@ namespace Config {
 
 			if (not load_warnings.empty()) write_new = true;
 		}
+		
+		// Load environment variable overrides after reading config file
+		// This allows environment variables to override config file values
+		load_env_overrides();
 	}
 
 	void write() {
@@ -784,11 +780,34 @@ namespace Config {
 		std::ofstream cwrite(conf_file, std::ios::trunc);
 		cwrite.imbue(std::locale::classic());
 		if (cwrite.good()) {
-			cwrite << "#? Config file for btop v. " << Global::Version << "\n";
+			cwrite << "#? Config file for bottop v. " << Global::Version << "\n";
+			#ifdef AZEROTHCORE_SUPPORT
+			cwrite << "\n#* SECURITY NOTE: Sensitive values can be set via environment variables:\n"
+					<< "#* - BOTTOP_AC_DB_PASS    (database password)\n"
+					<< "#* - BOTTOP_AC_DB_USER    (database username)\n"
+					<< "#* - BOTTOP_AC_SSH_HOST   (SSH connection string)\n"
+					<< "#* - BOTTOP_AC_DB_HOST    (database host)\n"
+					<< "#* - BOTTOP_AC_DB_NAME    (database name)\n"
+					<< "#* - BOTTOP_AC_CONTAINER  (docker container name)\n"
+					<< "#* - BOTTOP_AC_RA_USERNAME (RA console username)\n"
+					<< "#* - BOTTOP_AC_RA_PASSWORD (RA console password)\n"
+					<< "#* Add these to ~/.zshrc_envvars to keep passwords out of this config file.\n";
+			#endif
 			for (const auto& [name, description] : descriptions) {
+				// Skip writing sensitive values if they come from environment variables
+				bool skip_value = false;
+				#ifdef AZEROTHCORE_SUPPORT
+				if (name == "azerothcore_db_pass" && std::getenv("BOTTOP_AC_DB_PASS")) {
+					skip_value = true;
+				}
+				#endif
+				
 				cwrite << "\n" << (description.empty() ? "" : description + "\n")
 						<< name << " = ";
-				if (strings.contains(name))
+				if (skip_value) {
+					cwrite << "\"<set via BOTTOP_AC_DB_PASS environment variable>\"";
+				}
+				else if (strings.contains(name))
 					cwrite << "\"" << strings.at(name) << "\"";
 				else if (ints.contains(name))
 					cwrite << ints.at(name);
@@ -826,6 +845,6 @@ namespace Config {
 	}
 
 	auto get_log_file() -> std::optional<fs::path> {
-		return get_xdg_state_dir().transform([](auto&& state_home) -> auto { return state_home / "btop.log"; });
+		return get_xdg_state_dir().transform([](auto&& state_home) -> auto { return state_home / "bottop.log"; });
 	}
 }
