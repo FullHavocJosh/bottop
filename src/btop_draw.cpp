@@ -1827,7 +1827,7 @@ namespace Draw {
 				}
 				
 				string percent_str = to_string((int)faction.percent) + "%";
-				out += Mv::to(dist_cy, dist_x + 1) + faction_color + ljust(faction.name, 15);
+				out += Mv::to(dist_cy, dist_x + 2) + faction_color + ljust(faction.name, 15);
 				out += faction_color + rjust(percent_str, 4);
 				dist_cy++;
 			}
@@ -1840,7 +1840,7 @@ namespace Draw {
 					if (dist_cy >= dist_y + dist_height - 1) break;
 					
 					string percent_str = to_string((int)continent.percent) + "%";
-					out += Mv::to(dist_cy, dist_x + 1) + Theme::c("inactive_fg") + ljust(continent.name, 15);
+					out += Mv::to(dist_cy, dist_x + 2) + Theme::c("inactive_fg") + ljust(continent.name, 15);
 					out += main_fg + rjust(percent_str, 4);
 					dist_cy++;
 				}
@@ -1887,32 +1887,29 @@ namespace Draw {
 		}
 		
 		// 3-tier color system based on deviation from expected
-		// Green: ±0-3% (on target)
-		// Yellow: ±3-6% (warning)
-		// Red: ±6-9%+ (critical)
+		// Green: ±0-1% (on target)
+		// Yellow: ±2-3% (warning)
+		// Red: >3% (critical)
 		string line_color = Theme::c("inactive_fg");  // Default grey
 		if (has_expected && expected_percent > 0) {
 			double deviation = abs(percent - expected_percent);
 			
-			if (deviation <= 3.0) {
-				// Green - on target (±3%)
+			if (deviation <= 1.0) {
+				// Green - on target (±1%)
 				line_color = Theme::c("proc_misc");  // Bright green
-			} else if (deviation <= 6.0) {
-				// Yellow - warning (±6%)
+			} else if (deviation <= 3.0) {
+				// Yellow - warning (±2-3%)
 				line_color = Theme::c("available_end");  // Bright yellow/orange
-			} else if (deviation <= 9.0) {
-				// Red - critical (±9%)
-				line_color = Theme::c("used_end");  // Bright red
 			} else {
-				// Beyond 9% - use title color (bright white) to indicate severe deviation
-				line_color = Theme::c("title");
+				// Red - critical (>3%)
+				line_color = Theme::c("used_end");  // Bright red
 			}
 		}
 		
-		string bracket_str = ljust(bracket_name, 13);
+		string bracket_str = ljust(bracket_name, 15);
 		string percent_str = to_string((int)percent) + "%";
 		
-		out += Mv::to(dist_cy, dist_x + 1) + line_color + bracket_str;
+		out += Mv::to(dist_cy, dist_x + 2) + line_color + bracket_str;
 		out += line_color + rjust(percent_str, 4);
 		dist_cy++;
 	}

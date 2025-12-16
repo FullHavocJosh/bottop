@@ -502,6 +502,7 @@ namespace AzerothCore {
 		int bot_min = 0;
 		int bot_max = 0;
 		std::vector<LevelBracket> level_distribution;
+		std::vector<Continent> continent_distribution;  // Expected continent distribution from config
 		std::vector<BracketDefinition> bracket_definitions;  // Actual bracket ranges from config
 		bool loaded = false;
 	};

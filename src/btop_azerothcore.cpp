@@ -762,24 +762,27 @@ namespace AzerothCore {
 		std::vector<Continent> continents;
 		
 		std::string query_str = 
-			"SELECT "
-			"  CASE map "
-			"    WHEN 0 THEN 'Eastern Kingdoms' "
-			"    WHEN 1 THEN 'Kalimdor' "
-			"    WHEN 530 THEN 'Outland' "
-			"    WHEN 571 THEN 'Northrend' "
-			"    WHEN 609 THEN 'Eastern Kingdoms' "
-			"    WHEN 30 THEN 'Battlegrounds' "
-			"    WHEN 489 THEN 'Battlegrounds' "
-			"    WHEN 529 THEN 'Battlegrounds' "
-			"    ELSE 'Instances' "
-			"  END as continent, "
-			"  COUNT(*) as count "
-			"FROM characters "
-			"WHERE online = 1 "
-			"  AND " + get_excluded_accounts_filter() + " "
-			"GROUP BY map "
-			"ORDER BY count DESC;";
+			"SELECT continent, SUM(count) as total_count FROM ( "
+			"  SELECT "
+			"    CASE map "
+			"      WHEN 0 THEN 'Eastern Kingdoms' "
+			"      WHEN 1 THEN 'Kalimdor' "
+			"      WHEN 530 THEN 'Outland' "
+			"      WHEN 571 THEN 'Northrend' "
+			"      WHEN 609 THEN 'Eastern Kingdoms' "
+			"      WHEN 30 THEN 'Battlegrounds' "
+			"      WHEN 489 THEN 'Battlegrounds' "
+			"      WHEN 529 THEN 'Battlegrounds' "
+			"      ELSE 'Instances' "
+			"    END as continent, "
+			"    COUNT(*) as count "
+			"  FROM characters "
+			"  WHERE online = 1 "
+			"    AND " + get_excluded_accounts_filter() + " "
+			"  GROUP BY map "
+			") as map_counts "
+			"GROUP BY continent "
+			"ORDER BY total_count DESC;";
 		
 		std::string result = mysql_exec(query_str);
 		if (result.empty()) return continents;
@@ -1433,18 +1436,9 @@ namespace AzerothCore {
 					container.short_name = container.name;
 				}
 				
-				// Filter: only show main service containers, skip init/helper containers
-				// Keep: worldserver, authserver, database
-				// Skip: db-import, client-data-init, bot-relocate, etc.
-				bool is_service_container = (
-					container.short_name.find("worldserver") != std::string::npos ||
-					container.short_name.find("authserver") != std::string::npos ||
-					container.short_name.find("database") != std::string::npos
-				);
-				
-				if (is_service_container) {
-					containers.push_back(container);
-				}
+				// Show ALL containers during troubleshooting (OFFLINE/RESTARTING/REBUILDING)
+				// This includes service containers AND any init/helper containers that may affect restart/rebuild
+				containers.push_back(container);
 			}
 			
 			Logger::debug("fetch_container_statuses: Found " + std::to_string(containers.size()) + " containers");
@@ -1683,6 +1677,15 @@ namespace AzerothCore {
 			{"61-70", 0, 10.0},
 			{"71-80", 0, 5.0}
 		};
+		
+		// Set default continent percentages
+		expected_values.continent_distribution = {
+			{"Eastern Kingdoms", 0, 40.0},
+			{"Kalimdor", 0, 40.0},
+			{"Outland", 0, 15.0},
+			{"Northrend", 0, 5.0}
+		};
+		
 		expected_values.loaded = true;
 		
 		debug_log << "Set 8 default brackets" << std::endl;
@@ -1832,6 +1835,59 @@ namespace AzerothCore {
 				}
 			}
 			
+			// Parse continent percentages
+			// Format: BotContinentPct.EasternKingdoms = 40.0
+			std::map<std::string, double> continent_percentages;
+			
+			std::istringstream continent_stream(bracket_content);
+			std::string continent_line;
+			
+			while (std::getline(continent_stream, continent_line)) {
+				// Skip comments and empty lines
+				if (continent_line.empty() || continent_line[0] == '#') continue;
+				
+				// Look for BotContinentPct.ContinentName
+				if (continent_line.find("BotContinentPct.") != std::string::npos) {
+					size_t eq_pos = continent_line.find('=');
+					if (eq_pos != std::string::npos) {
+						std::string value = continent_line.substr(eq_pos + 1);
+						value.erase(0, value.find_first_not_of(" \t"));
+						value.erase(value.find_last_not_of(" \t\r\n") + 1);
+						
+						size_t start = continent_line.find("BotContinentPct.") + 16;
+						size_t end = eq_pos;
+						if (start < end) {
+							std::string continent_key = continent_line.substr(start, end - start);
+							continent_key.erase(0, continent_key.find_first_not_of(" \t"));
+							continent_key.erase(continent_key.find_last_not_of(" \t") + 1);
+							
+							// Map config keys to continent display names
+							std::string continent_name;
+							if (continent_key == "EasternKingdoms") continent_name = "Eastern Kingdoms";
+							else if (continent_key == "Kalimdor") continent_name = "Kalimdor";
+							else if (continent_key == "Outland") continent_name = "Outland";
+							else if (continent_key == "Northrend") continent_name = "Northrend";
+							else continue;  // Unknown continent
+							
+							continent_percentages[continent_name] = std::stod(value);
+						}
+					}
+				}
+			}
+			
+			// Update continent distribution if found in config
+			if (!continent_percentages.empty()) {
+				expected_values.continent_distribution.clear();
+				for (const auto& pair : continent_percentages) {
+					expected_values.continent_distribution.push_back({
+						pair.first,  // name
+						0,           // count (will be filled during collection)
+						pair.second  // percent
+					});
+				}
+				Logger::error("load_expected_values: Loaded " + std::to_string(continent_percentages.size()) + " continent percentages from config");
+			}
+			
 			// Build bracket definitions from parsed values
 			if (!bracket_min_levels.empty() && !bracket_max_levels.empty()) {
 				debug_log << "Building brackets from parsed data, found " << bracket_min_levels.size() << " min levels" << std::endl;
@@ -1938,5 +1994,4 @@ namespace AzerothCore {
 		
 		return out.str();
 	}
-
 }
