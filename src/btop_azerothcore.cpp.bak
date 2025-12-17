@@ -45,7 +45,7 @@ namespace AzerothCore {
 	std::atomic<bool> enabled{false};
 	std::atomic<bool> active{false};
 	ServerConfig config;
-	std::unique_ptr<CommandExecutor> executor;  // Can be SSHClient or LocalExecutor
+	std::unique_ptr<SSHClient> ssh_client;
 	std::unique_ptr<Query> query;
 	ServerData current_data;
 	ExpectedValues expected_values;
@@ -57,30 +57,6 @@ namespace AzerothCore {
 	::AzerothCore::ServerPerformance last_known_perf;
 	uint64_t last_perf_update_time = 0;
 	const uint64_t PERF_UPDATE_INTERVAL_MS = 5000;  // Update every 5 seconds
-
-	//* LocalExecutor implementation
-	std::string LocalExecutor::execute(const std::string& command) {
-		Logger::error("LOCAL EXEC: " + command);
-		
-		FILE* pipe = popen(command.c_str(), "r");
-		if (!pipe) {
-			error_ = "Failed to execute command locally";
-			return "";
-		}
-		
-		std::ostringstream output;
-		char buffer[4096];
-		while (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-			output << buffer;
-		}
-		
-		int status = pclose(pipe);
-		if (status != 0 && status != -1) {
-			error_ = "Command exited with status " + std::to_string(status);
-		}
-		
-		return output.str();
-	}
 
 	//* SSHClient implementation
 	SSHClient::SSHClient(const std::string& host) : host_(host) {
@@ -337,8 +313,8 @@ namespace AzerothCore {
 	}
 
 	//* Query implementation
-	Query::Query(CommandExecutor& executor, const ServerConfig& config)
-		: executor_(executor), config_(config) {
+	Query::Query(SSHClient& ssh, const ServerConfig& config)
+		: ssh_(ssh), config_(config) {
 		// Cache excluded account IDs on construction
 		cache_excluded_accounts();
 	}
@@ -352,8 +328,8 @@ namespace AzerothCore {
 		<< " -D" << config_.db_name
 		<< " -sN -e \"" << query << "\" 2>/dev/null";  // Suppress MySQL warnings
 	
-	Logger::error("MYSQL DEBUG: Executing command: " + cmd.str());
-	std::string result = executor_.execute(cmd.str());
+	Logger::error("MYSQL DEBUG: Executing SSH command: " + cmd.str());
+	std::string result = ssh_.execute(cmd.str());
 	Logger::error("MYSQL DEBUG: Got result (length=" + std::to_string(result.length()) + "): '" + result.substr(0, 100) + "'");
 	return result;
 	}
@@ -416,7 +392,7 @@ namespace AzerothCore {
 	std::ostringstream cmd;
 	cmd << "docker inspect " << config_.container << " --format='{{.State.StartedAt}}'";
 	
-	result = executor_.execute(cmd.str());
+	result = ssh_.execute(cmd.str());
 	if (!result.empty()) {
 		// Parse ISO 8601 timestamp: 2025-12-11T16:27:03.505639176Z
 		// Extract year, month, day, hour, minute, second
@@ -486,7 +462,7 @@ namespace AzerothCore {
 		<< "' 2>&1";
 	
 	Logger::debug("fetch_server_performance: Executing: " + cmd.str());
-	std::string result = executor_.execute(cmd.str());
+	std::string result = ssh_.execute(cmd.str());
 	Logger::debug("fetch_server_performance: Result length: " + std::to_string(result.length()));
 	
 	// Debug: write to file
@@ -1375,7 +1351,7 @@ namespace AzerothCore {
 			std::string check_cmd = "docker exec " + config_.container + 
 			                       " cat /tmp/azerothcore_rebuild_progress.txt 2>/dev/null || echo 'none'";
 			
-			std::string result = executor_.execute(check_cmd);
+			std::string result = ssh_.execute(check_cmd);
 			
 			// Trim whitespace
 			result.erase(0, result.find_first_not_of(" \t\n\r"));
@@ -1418,7 +1394,7 @@ namespace AzerothCore {
 			//   testing-ac-database|running|Up 2 hours
 			
 			std::string cmd = "docker ps -a --filter 'name=ac-' --format '{{.Names}}|{{.State}}|{{.Status}}'";
-			std::string result = executor_.execute(cmd);
+			std::string result = ssh_.execute(cmd);
 			
 			if (result.empty()) {
 				Logger::debug("fetch_container_statuses: No containers found");
@@ -1535,61 +1511,21 @@ namespace AzerothCore {
 			return;
 		}
 		
+		debug_log << "Proceeding with SSH connection" << std::endl;
+		std::cerr << "[BOTTOP DEBUG] init() proceeding with SSH connection" << std::endl;
+		
 		try {
-			// Auto-detect if we should use local Docker
-			if (config.ssh_host.empty() || config.ssh_host == "localhost" || config.ssh_host == "127.0.0.1") {
-				// Force local mode if ssh_host is empty or localhost
-				config.use_local = true;
-				debug_log << "SSH host is empty/localhost, forcing local mode" << std::endl;
-			} else if (!config.use_local) {
-				// Check if Docker is available locally with AzerothCore containers
-				FILE* pipe = popen("docker ps --filter 'name=ac-' --format '{{.Names}}' 2>/dev/null | head -1", "r");
-				if (pipe) {
-					char buffer[256];
-					std::string result;
-					if (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-						result = buffer;
-						// Trim whitespace
-						result.erase(0, result.find_first_not_of(" \t\r\n"));
-						result.erase(result.find_last_not_of(" \t\r\n") + 1);
-					}
-					pclose(pipe);
-					
-					if (!result.empty()) {
-						config.use_local = true;
-						debug_log << "Found local AzerothCore containers, enabling local mode" << std::endl;
-						std::cerr << "[BOTTOP DEBUG] Auto-detected local AzerothCore containers: " << result << std::endl;
-						Logger::error("Auto-detected local AzerothCore container, using local Docker mode");
-					}
-				}
+			ssh_client = std::make_unique<SSHClient>(config.ssh_host);
+			if (!ssh_client->connect()) {
+				debug_log << "SSH connection failed: " << ssh_client->last_error() << std::endl;
+				std::cerr << "[BOTTOP DEBUG] SSH connection failed: " << ssh_client->last_error() << std::endl;
+				current_data.error = "Failed to connect: " + ssh_client->last_error();
+				return;
 			}
 			
-			// Create appropriate executor
-			if (config.use_local) {
-				debug_log << "Using local Docker mode" << std::endl;
-				std::cerr << "[BOTTOP DEBUG] Using local Docker executor" << std::endl;
-				Logger::error("Initializing local Docker connection");
-				executor = std::make_unique<LocalExecutor>();
-				current_data.server_url = "localhost (Docker)";
-			} else {
-				debug_log << "Using SSH mode to " << config.ssh_host << std::endl;
-				std::cerr << "[BOTTOP DEBUG] Using SSH executor to " << config.ssh_host << std::endl;
-				Logger::error("Initializing SSH connection to " + config.ssh_host);
-				
-				auto ssh = std::make_unique<SSHClient>(config.ssh_host);
-				if (!ssh->connect()) {
-					debug_log << "SSH connection failed: " << ssh->last_error() << std::endl;
-					std::cerr << "[BOTTOP DEBUG] SSH connection failed: " << ssh->last_error() << std::endl;
-					current_data.error = "Failed to connect: " + ssh->last_error();
-					return;
-				}
-				executor = std::move(ssh);
-				current_data.server_url = config.ssh_host;
-			}
-			
-			debug_log << "Executor created successfully, creating Query object" << std::endl;
-			std::cerr << "[BOTTOP DEBUG] Executor ready, creating Query object" << std::endl;
-			query = std::make_unique<Query>(*executor, config);
+			debug_log << "SSH connected successfully" << std::endl;
+			std::cerr << "[BOTTOP DEBUG] SSH connected, creating Query object" << std::endl;
+			query = std::make_unique<Query>(*ssh_client, config);
 			active = true;
 			
 			debug_log << "About to call load_expected_values()" << std::endl;
@@ -1608,12 +1544,12 @@ namespace AzerothCore {
 	}
 
 	bool check_server_online() {
-		if (!executor || !executor->is_connected()) return false;
+		if (!ssh_client || !ssh_client->is_connected()) return false;
 		
 		try {
 			// Check if container is running
 			std::string cmd = "docker ps --filter name=" + config.container + " --format '{{.Status}}'";
-			std::string status = executor->execute(cmd);
+			std::string status = ssh_client->execute(cmd);
 			
 			// If output contains "Up", container is running
 			return status.find("Up") != std::string::npos;
@@ -1676,13 +1612,9 @@ namespace AzerothCore {
 		Logger::error("COLLECT DEBUG: Server online, calling fetch_all()");
 		ServerData new_data = query->fetch_all();
 		
-		// Fetch container statuses for ONLINE state too
-		new_data.containers = query->fetch_container_statuses();
-
-		
 		// DEBUG: Log what we got back
 		Logger::error("COLLECT DEBUG: fetch_all() returned, total=" + std::to_string(new_data.stats.total) + 
-		              " zones=" + std::to_string(new_data.zones.size()) + " containers=" + std::to_string(new_data.containers.size()) +
+		              " zones=" + std::to_string(new_data.zones.size()) +
 		              " error=" + new_data.error);
 		
 		// Success - reset failure counter and rebuild progress
@@ -1730,25 +1662,20 @@ namespace AzerothCore {
 		
 		// Set default brackets (8 brackets for WotLK)
 		expected_values.bracket_definitions = {
-			{1, 9}, {10, 19}, {20, 29}, {30, 39},
-			{40, 49}, {50, 59}, {60, 60}, {61, 69},
-			{70, 70}, {71, 79}, {80, 80}
+			{1, 10}, {11, 20}, {21, 30}, {31, 40},
+			{41, 50}, {51, 60}, {61, 70}, {71, 80}
 		};
 		
 		// Set default percentages
-		// Set default percentages
 		expected_values.level_distribution = {
-			{"1-9", 0, 5.0},
-			{"10-19", 0, 6.0},
-			{"20-29", 0, 10.0},
-			{"30-39", 0, 9.0},
-			{"40-49", 0, 8.0},
-			{"50-59", 0, 6.0},
-			{"60", 0, 12.0},
-			{"61-69", 0, 7.0},
-			{"70", 0, 10.0},
-			{"71-79", 0, 16.0},
-			{"80", 0, 11.0}
+			{"1-10", 0, 10.0},
+			{"11-20", 0, 15.0},
+			{"21-30", 0, 15.0},
+			{"31-40", 0, 15.0},
+			{"41-50", 0, 15.0},
+			{"51-60", 0, 15.0},
+			{"61-70", 0, 10.0},
+			{"71-80", 0, 5.0}
 		};
 		
 		// Set default continent percentages
@@ -1759,106 +1686,20 @@ namespace AzerothCore {
 			{"Northrend", 0, 5.0}
 		};
 		
-	expected_values.loaded = true;
-	
-	debug_log << "Set 8 default brackets" << std::endl;
-	Logger::error("load_expected_values: Set 8 default brackets");
-	
-	// Check if SSH is available at all
-	if (!executor || !executor->is_connected()) {
-		debug_log << "No SSH connection available - ssh=" << (executor ? "yes" : "no") 
-		          << ", connected=" << ((executor && executor->is_connected()) ? "yes" : "no") << std::endl;
-		debug_log.close();
-		Logger::error("load_expected_values: No SSH connection available, using defaults");
-		return;
-	}
-	
-	// Auto-discover container name if not manually configured
-	if (config.container.empty()) {
-		debug_log << "Container not configured, attempting auto-discovery..." << std::endl;
-		Logger::error("load_expected_values: Container not configured, attempting auto-discovery");
+		expected_values.loaded = true;
 		
-		// Try multiple patterns to find the worldserver container
-		std::vector<std::string> container_patterns = {
-			"docker ps --filter 'name=ac-worldserver' --format '{{.Names}}' | head -1",
-			"docker ps --filter 'name=worldserver' --format '{{.Names}}' | grep -i ac | head -1",
-			"docker ps --format '{{.Names}}' | grep -i worldserver | head -1",
-			"docker ps --format '{{.Names}}' | grep 'ac-' | head -1"
-		};
+		debug_log << "Set 8 default brackets" << std::endl;
+		Logger::error("load_expected_values: Set 8 default brackets");
 		
-		for (const auto& cmd : container_patterns) {
-			try {
-				debug_log << "Trying pattern: " << cmd << std::endl;
-				std::string result = executor->execute(cmd);
-				
-				// Trim whitespace and newlines
-				result.erase(0, result.find_first_not_of(" \t\r\n"));
-				result.erase(result.find_last_not_of(" \t\r\n") + 1);
-				
-				if (!result.empty() && result.find("Error") == std::string::npos) {
-					config.container = result;
-					debug_log << "Auto-discovered container: " << config.container << std::endl;
-					Logger::error("load_expected_values: Auto-discovered container: " + config.container);
-					break;
-				}
-			} catch (const std::exception& e) {
-				debug_log << "Pattern failed: " << e.what() << std::endl;
-				continue;
-			}
-		}
-		
-		if (config.container.empty()) {
-			debug_log << "Failed to auto-discover container, using defaults" << std::endl;
+		// Try to load from remote config if available
+		if (!ssh_client || !ssh_client->is_connected() || config.config_path.empty()) {
+			debug_log << "No remote config available - ssh=" << (ssh_client ? "yes" : "no") 
+			          << ", connected=" << ((ssh_client && ssh_client->is_connected()) ? "yes" : "no")
+			          << ", config_path=" << config.config_path << std::endl;
 			debug_log.close();
-			Logger::error("load_expected_values: Failed to auto-discover container, using defaults");
+			Logger::error("load_expected_values: No remote config available, using defaults (ssh=" + std::string(ssh_client ? "yes" : "no") + ", connected=" + std::string((ssh_client && ssh_client->is_connected()) ? "yes" : "no") + ", config_path=" + config.config_path + ")");
 			return;
 		}
-	} else {
-		debug_log << "Using manually configured container: " << config.container << std::endl;
-		Logger::error("load_expected_values: Using manually configured container: " + config.container);
-	}
-	
-	// Auto-discover config path if not manually configured
-	if (config.config_path.empty()) {
-		debug_log << "Config path not configured, attempting auto-discovery..." << std::endl;
-		Logger::error("load_expected_values: Config path not configured, attempting auto-discovery");
-		
-		// Try common paths in order of likelihood
-		std::vector<std::string> config_paths = {
-			"/azerothcore/env/dist/etc/worldserver.conf",
-			"/etc/worldserver.conf",
-			"/opt/azerothcore/etc/worldserver.conf",
-			"/azerothcore/etc/worldserver.conf"
-		};
-		
-		for (const auto& path : config_paths) {
-			try {
-				std::string test_cmd = "docker exec " + config.container + " test -f " + path + " && echo found";
-				debug_log << "Testing path: " << path << std::endl;
-				std::string result = executor->execute(test_cmd);
-				
-				if (result.find("found") != std::string::npos) {
-					config.config_path = path;
-					debug_log << "Auto-discovered config path: " << config.config_path << std::endl;
-					Logger::error("load_expected_values: Auto-discovered config path: " + config.config_path);
-					break;
-				}
-			} catch (const std::exception& e) {
-				debug_log << "Path test failed: " << e.what() << std::endl;
-				continue;
-			}
-		}
-		
-		if (config.config_path.empty()) {
-			debug_log << "Failed to auto-discover config path, using defaults" << std::endl;
-			debug_log.close();
-			Logger::error("load_expected_values: Failed to auto-discover config path, using defaults");
-			return;
-		}
-	} else {
-		debug_log << "Using manually configured config path: " << config.config_path << std::endl;
-		Logger::error("load_expected_values: Using manually configured config path: " + config.config_path);
-	}
 		
 		debug_log << "Starting bracket config load from container: " << config.container << std::endl;
 		Logger::error("load_expected_values: Starting bracket config load from container: " + config.container);
@@ -1870,7 +1711,7 @@ namespace AzerothCore {
 			// Read main config file from container
 			std::string cmd = "docker exec " + config.container + " cat " + config.config_path;
 			debug_log << "Executing command: " << cmd << std::endl;
-			std::string config_content = executor->execute(cmd);
+			std::string config_content = ssh_client->execute(cmd);
 			
 			debug_log << "Got config content, length=" << config_content.length() << std::endl;
 			Logger::error("load_expected_values: Got config content, length=" + std::to_string(config_content.length()));
@@ -1915,7 +1756,7 @@ namespace AzerothCore {
 			std::string bracket_config_path = "/azerothcore/env/dist/etc/modules/mod_player_bot_level_brackets.conf";
 			std::string bracket_cmd = "docker exec " + config.container + " cat " + bracket_config_path;
 			debug_log << "About to execute bracket config command: " << bracket_cmd << std::endl;
-			std::string bracket_content = executor->execute(bracket_cmd);
+			std::string bracket_content = ssh_client->execute(bracket_cmd);
 			
 			debug_log << "Got bracket content, length=" << bracket_content.length() << std::endl;
 			
@@ -2109,7 +1950,7 @@ namespace AzerothCore {
 	
 	void cleanup() {
 		query.reset();
-		executor.reset();
+		ssh_client.reset();
 		active = false;
 	}
 

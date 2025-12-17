@@ -345,6 +345,7 @@ namespace AzerothCore {
 		std::string ra_username = "";  // RA (Remote Administrator) console username
 		std::string ra_password = "";  // RA (Remote Administrator) console password
 		int update_interval = 5;
+		bool use_local = false;  // If true, use local Docker instead of SSH
 		
 		// InfluxDB metrics (optional - if not set, falls back to MySQL query timing)
 		std::string influx_host = "";  // e.g., "127.0.0.1"
@@ -507,16 +508,39 @@ namespace AzerothCore {
 		bool loaded = false;
 	};
 
+	//* Command executor interface - can be SSH or local
+	class CommandExecutor {
+	public:
+		virtual ~CommandExecutor() = default;
+		virtual std::string execute(const std::string& command) = 0;
+		virtual bool is_connected() const = 0;
+		virtual std::string last_error() const = 0;
+	};
+
+	//* Local command executor (uses popen)
+	class LocalExecutor : public CommandExecutor {
+	public:
+		LocalExecutor() = default;
+		~LocalExecutor() override = default;
+		
+		std::string execute(const std::string& command) override;
+		bool is_connected() const override { return true; }  // Always "connected" for local
+		std::string last_error() const override { return error_; }
+		
+	private:
+		std::string error_;
+	};
+
 	//* SSH Client wrapper for libssh2
-	class SSHClient {
+	class SSHClient : public CommandExecutor {
 	public:
 		SSHClient(const std::string& host);
 		~SSHClient();
 		
 		bool connect();
-		std::string execute(const std::string& command);
-		bool is_connected() const;
-		std::string last_error() const;
+		std::string execute(const std::string& command) override;
+		bool is_connected() const override;
+		std::string last_error() const override;
 		
 	private:
 		std::string host_;
@@ -528,7 +552,7 @@ namespace AzerothCore {
 	//* Query handler for AzerothCore bot data
 	class Query {
 	public:
-		Query(SSHClient& ssh, const ServerConfig& config);
+		Query(CommandExecutor& executor, const ServerConfig& config);
 		
 		ServerData fetch_all();
 		std::vector<ZoneDetail> fetch_zone_details(int zone_id);  // Fetch level breakdown for a zone
@@ -536,7 +560,7 @@ namespace AzerothCore {
 		std::vector<ContainerStatus> fetch_container_statuses();  // Fetch status of all AzerothCore containers
 		
 	private:
-		SSHClient& ssh_;
+		CommandExecutor& executor_;  // Changed from ssh_ to executor_
 		ServerConfig config_;
 		std::string excluded_account_ids_;  // Cached list of excluded account IDs (e.g., "1,2,3,4")
 		

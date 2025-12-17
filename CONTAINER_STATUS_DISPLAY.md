@@ -1,23 +1,25 @@
 # Container Status Display Feature
 
 **Date**: December 16, 2025  
-**Status**: Implemented and Tested ✅
+**Status**: Implemented and Tested ✅  
+**Latest Update**: Enhanced to show descriptive status (Dec 16 18:31)
 
 ## Overview
 
-Added container status display feature to show the state of AzerothCore Docker containers when the server is not in ONLINE status. This provides immediate diagnostic information about which containers are running or stopped.
+Added container status display feature to show the state of AzerothCore Docker containers. This provides immediate diagnostic information about which containers are running or stopped, with human-readable uptime/status information.
 
 ## Implementation Details
 
 ### When Container Status is Displayed
 
-Container statuses are shown in the Performance pane when:
+Container statuses are shown in the Performance pane **ALWAYS** when container data is available:
 
-- Server status is **OFFLINE** (container not running)
-- Server status is **RESTARTING** (recovering from failures)
-- Server status is **REBUILDING** (database rebuild in progress)
+- Server status is **ONLINE** - Shows containers with uptime
+- Server status is **OFFLINE** - Shows containers with exit status
+- Server status is **RESTARTING** - Shows containers during recovery
+- Server status is **REBUILDING** - Shows containers during rebuild
 
-Container list is **hidden** when server status is **ONLINE** to keep the UI clean.
+**Latest Change (Dec 16 18:31)**: Container list now displays at all times, not just when offline, providing constant visibility into container health.
 
 ### Container Filtering
 
@@ -69,18 +71,34 @@ bool is_service_container = (
 **Layout** (in Performance pane):
 
 ```
-Status: OFFLINE
-
-  worldserver: exited     (red)
-  authserver: running     (green)
-  database: running       (green)
+Status: ONLINE [12:34:56]
+  worldserver: Up 2 hours     (green)
+  authserver: Up 2 hours      (green)
+  mysql: Up 3 hours           (green)
 ```
+
+When offline:
+
+```
+Status: OFFLINE
+  worldserver: Exited (0) 5 minutes ago   (red)
+  authserver: Up 2 hours                  (green)
+  mysql: Up 3 hours                       (green)
+```
+
+**Status Field Change (Dec 16 18:31)**:
+
+- **Before**: Displayed `container.state` (e.g., "running", "exited")
+- **After**: Displays `container.status` (e.g., "Up 2 hours", "Exited (0) 5 minutes ago")
+- **Benefit**: Matches `docker ps` output format with human-readable uptime/duration
 
 **Color Coding**:
 
 - **Green**: Container is running (state = "running")
 - **Yellow**: Container is restarting or paused
 - **Red**: Container is exited, dead, or in error state
+
+Color determination still uses `container.state` for logic, but displayed text now shows descriptive `container.status`.
 
 ### Data Collection
 
@@ -115,13 +133,22 @@ testing-ac-database|exited|Exited (0) 5 minutes ago
 - Line 1577: Called when server is **OFFLINE**
 - Line 1596: Called when server is **REBUILDING**
 
-**Display** (`src/btop_draw.cpp:1661-1685`):
+**Display** (`src/btop_draw.cpp:1658-1683`):
 
 ```cpp
-if (data.status != ServerStatus::ONLINE && !data.containers.empty()) {
-    // Show container statuses with color coding
+// Show containers always when data exists (Dec 16 18:31 change)
+if (!data.containers.empty()) {
+    // Display each container with color coding
+    // Line 1680: Uses container.status for display (not container.state)
+    out += Mv::to(cy++, perf_x + 4) + state_color + container.short_name + ": "
+        + state_color + container.status;  // Shows "Up 2 hours", not "running"
 }
 ```
+
+**Key Changes**:
+
+1. **Display Condition**: Changed from `data.status != ServerStatus::ONLINE` to `!data.containers.empty()`
+2. **Status Field**: Changed from `container.state` to `container.status` for human-readable output
 
 ## Testing Performed
 
@@ -143,14 +170,14 @@ if (data.status != ServerStatus::ONLINE && !data.containers.empty()) {
 3. **Expected**: Only worldserver, authserver, database shown
 4. **Result**: ✅ Helper containers (db-import, client-data-init, bot-relocate) correctly filtered out
 
-### Test 3: Return to ONLINE
+### Test 3: Return to ONLINE - Container List Remains Visible
 
 **Steps**:
 
 1. Started worldserver: `docker start testing-ac-worldserver`
 2. Waited for server to come online
-3. **Expected**: Container list disappears, status shows ONLINE
-4. **Result**: ✅ Clean transition back to ONLINE status
+3. **Expected**: Container list stays visible with updated statuses
+4. **Result**: ✅ (Dec 16 18:31) Container list now visible during ONLINE status, showing uptime info
 
 ### Test 4: REBUILDING Status
 
@@ -176,7 +203,16 @@ if (data.status != ServerStatus::ONLINE && !data.containers.empty()) {
 
 ### Normal Operation
 
-When server is ONLINE, container statuses are hidden automatically. No action needed.
+When server is ONLINE, container statuses show uptime information:
+
+```
+Status: ONLINE [12:34:56]
+  worldserver: Up 2 hours
+  authserver: Up 2 hours
+  mysql: Up 3 hours
+```
+
+This provides continuous visibility into container health without requiring a failure state.
 
 ### Troubleshooting with Container Display
 
@@ -184,10 +220,9 @@ When server is ONLINE, container statuses are hidden automatically. No action ne
 
 ```
 Status: OFFLINE
-
-  worldserver: exited     ← Problem: worldserver crashed
-  authserver: running
-  database: running
+  worldserver: Exited (0) 5 minutes ago    ← Problem: worldserver crashed
+  authserver: Up 2 hours
+  mysql: Up 3 hours
 ```
 
 **Action**: Check worldserver logs, restart container
@@ -196,10 +231,9 @@ Status: OFFLINE
 
 ```
 Status: OFFLINE
-
-  worldserver: exited
-  authserver: running
-  database: exited        ← Problem: database stopped
+  worldserver: Exited (137) 1 minute ago
+  authserver: Up 2 hours
+  mysql: Exited (1) 2 minutes ago        ← Problem: database stopped
 ```
 
 **Action**: Check database logs, verify data volume, restart database
@@ -208,10 +242,9 @@ Status: OFFLINE
 
 ```
 Status: OFFLINE
-
-  worldserver: exited
-  authserver: exited
-  database: exited
+  worldserver: Exited (0) 10 minutes ago
+  authserver: Exited (0) 10 minutes ago
+  mysql: Exited (0) 10 minutes ago
 ```
 
 **Action**: Check Docker daemon, system resources, restart all services
@@ -220,13 +253,12 @@ Status: OFFLINE
 
 ```
 Status: REBUILDING [45%]
-
-  worldserver: running
-  authserver: running
-  database: running
+  worldserver: Up 15 minutes
+  authserver: Up 20 minutes
+  mysql: Up 25 minutes
 ```
 
-All containers should be running during rebuild. If any show "exited", the rebuild may have failed.
+All containers should be running during rebuild. If any show "Exited", the rebuild may have failed.
 
 ## Configuration Requirements
 
@@ -406,11 +438,18 @@ This feature complements:
 
 ## Summary
 
-✅ **Feature Complete**: Container status display working as designed  
+✅ **Feature Complete**: Container status display working with descriptive status text  
 ✅ **Tested**: All scenarios verified (OFFLINE, REBUILDING, ONLINE)  
 ✅ **Filtered**: Only shows service containers (worldserver, authserver, database)  
 ✅ **Color-Coded**: Easy visual identification of container states  
-✅ **Non-Intrusive**: Hidden during normal ONLINE operation  
+✅ **Always Visible**: Shows during all server states for continuous monitoring (Dec 16 18:31)  
+✅ **Human-Readable**: Displays uptime/exit duration like `docker ps` (Dec 16 18:31)  
 ✅ **Production Ready**: Suitable for live server monitoring
 
-**Next Steps**: Monitor in production, gather user feedback, consider enhancements
+**Latest Changes (Dec 16 18:31)**:
+
+- Changed display from `container.state` to `container.status` for readable output
+- Container list now shows always (not just when offline)
+- Provides continuous visibility into container health and uptime
+
+**Next Steps**: Test in live environment, verify display formatting

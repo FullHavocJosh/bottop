@@ -1,5 +1,3 @@
-make: *** No rule to make target 'obj/igt_perf.c.o', needed by 'bottop'.  Stop.
-make: *** Waiting for unfinished jobs....
  
  [38;5;196m██████[38;5;240m╗ [38;5;196m████████[38;5;240m╗ [38;5;196m██████[38;5;240m╗ [38;5;196m██████[38;5;240m╗
  [38;5;160m██[38;5;239m╔══[38;5;160m██[38;5;239m╗╚══[38;5;160m██[38;5;239m╔══╝[38;5;160m██[38;5;239m╔═══[38;5;160m██[38;5;239m╗[38;5;160m██[38;5;239m╔══[38;5;160m██[38;5;239m╗   [38;5;160m██[38;5;239m╗    [38;5;160m██[38;5;239m╗
@@ -7,15 +5,32 @@ make: *** Waiting for unfinished jobs....
  [38;5;88m██[38;5;237m╔══[38;5;88m██[38;5;237m╗   [38;5;88m██[38;5;237m║   [38;5;88m██[38;5;237m║   [38;5;88m██[38;5;237m║[38;5;88m██[38;5;237m╔═══╝  ╚═[38;5;88m██[38;5;237m╔═╝╚═[38;5;88m██[38;5;237m╔═╝
  [38;5;52m██████[38;5;236m╔╝   [38;5;52m██[38;5;236m║   ╚[38;5;52m██████[38;5;236m╔╝[38;5;52m██[38;5;236m║        ╚═╝    ╚═╝
  [38;5;235m╚═════╝    ╚═╝    ╚═════╝ ╚═╝      [1;3;38;5;240mMakefile v1.6[0m
-[1;92mPLATFORM     [1;93m?| [0mLinux
-[1;96mARCH         [1;93m?| [0mx86_64
-[1;95mGPU_SUPPORT  [1;94m:| [0mtrue
-[1;93mCXX          [1;93m?| [0mg++ [1;93m([97m15.2.1[93m)
-[1;93mCC           [1;93m?| [0mcc [1;93m([97m21.1.6[93m)
-[1;94mTHREADS      [1;94m:| [0m12
+[1;92mPLATFORM     [1;93m?| [0mmacos
+[1;96mARCH         [1;93m?| [0marm64
+[1;95mGPU_SUPPORT  [1;94m:| [0mfalse
+[1;93mCXX          [1;93m?| [0mc++ [1;93m([97m17.0.0[93m)
+
+[1;93mCommand 'lowdown' not found: skipping generating man page btop.1[0m
+[1;94mTHREADS      [1;94m:| [0m8
 [1;92mREQFLAGS     [1;91m!| [0m-std=c++23
 [1;91mWARNFLAGS    [1;94m:| [0m-Wall -Wextra -pedantic
 [1;94mOPTFLAGS     [1;94m:| [0m-O2 
-[1;93mLDCXXFLAGS   [1;94m:| [0m-pthread -DFMT_HEADER_ONLY -D_GLIBCXX_ASSERTIONS -D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_DEBUG -D_FILE_OFFSET_BITS=64 -fexceptions -fstack-clash-protection -fcf-protection -fstack-protector -DGPU_SUPPORT -DAZEROTHCORE_SUPPORT 
+[1;93mLDCXXFLAGS   [1;94m:| [0m-pthread -DFMT_HEADER_ONLY -D_GLIBCXX_ASSERTIONS -D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_DEBUG -D_FILE_OFFSET_BITS=64 -fexceptions -fstack-clash-protection  -DAZEROTHCORE_SUPPORT -I/opt/homebrew/Cellar/libssh2/1.11.1/include -I/opt/homebrew/Cellar/openssl@3/3.6.0/include -framework IOKit -framework CoreFoundation -Wno-format-truncation
 [1;95mCXXFLAGS     [1;92m+| [0;37m$([92mREQFLAGS[37m) $([93mLDCXXFLAGS[37m) $([94mOPTFLAGS[37m) $([91mWARNFLAGS[37m) 
-[1;95mLDFLAGS      [1;92m+| [0;37m$([93mLDCXXFLAGS[37m) $([94mOPTFLAGS[37m) $([91mWARNFLAGS[37m) 
+[1;95mLDFLAGS      [1;92m+| [0;37m$([93mLDCXXFLAGS[37m) $([94mOPTFLAGS[37m) $([91mWARNFLAGS[37m) -L/opt/homebrew/opt/openssl@3/lib
+
+[1;92mBuilding bottop [91m([97mv1.4.5[91m) [93mmacos [96marm64[0m
+[1;97mCompiling src/btop_draw.cpp[0m
+clang++: warning: -framework IOKit: 'linker' input unused [-Wunused-command-line-argument]
+clang++: warning: -framework CoreFoundation: 'linker' input unused [-Wunused-command-line-argument]
+clang++: warning: argument unused during compilation: '-fstack-clash-protection' [-Wunused-command-line-argument]
+src/btop_draw.cpp:1976:60: warning: lambda capture 'data' is not required to be captured for this use [-Wunused-lambda-capture]
+ 1976 |         std::sort(sorted_indices.begin(), sorted_indices.end(), [&data](size_t a_idx, size_t b_idx) {
+      |                                                                  ~^~~~
+1 warning generated.
+[1;92m90%[10D[5C-> [1;37mobj/btop_draw.o [100D[38C[1;93m([1;97m2.0MiB[1;93m) [92m([97m[92m)[0m
+
+[1;92mLinking and optimizing binary[37m...[0m
+[1;92m100% -> [1;37mbin/bottop [100D[38C[1;93m([1;97m2.7MiB[1;93m) [92m([97m[92m)[0m
+
+[1;92mBuild complete in [92m([97m06s[92m)[0m

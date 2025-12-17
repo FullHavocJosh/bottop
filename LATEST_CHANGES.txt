@@ -1,164 +1,59 @@
-╔══════════════════════════════════════════════════════════════════════════════╗
-║                    BOTTOP - LATEST CHANGES                                   ║
-║                    December 16, 2025 - 16:16                                 ║
-╚══════════════════════════════════════════════════════════════════════════════╝
+BOTTOP - Latest Changes
+December 16, 2024 - 18:45
 
-COMPLETED IN THIS SESSION:
-────────────────────────────────────────────────────────────────────────────────
+=== WHITE LABELS FOR BETTER READABILITY ===
 
-✅ 1. Container Status for RESTARTING State
-   - Container statuses now display during RESTARTING (in addition to OFFLINE/REBUILDING)
-   - Shows which containers are running/stopped during restart process
-   - File: Already working in btop_draw.cpp:1661
+✅ COMPLETED: Made labels white, only values are colored
 
-✅ 2. Show ALL Containers (Not Just Service Containers)
-   - Removed filtering that hid init/helper containers
-   - Now shows: worldserver, authserver, database, db-import, client-data-init, bot-relocate, etc.
-   - Benefit: Can see if init containers are blocking restart/rebuild
-   - File: src/btop_azerothcore.cpp:1436-1438
+CHANGES:
+1. Container names now white (like "Status:")
+   - "worldserver:" in white, "Up 2 hours" in green/red/yellow
+   - "authserver:" in white, status in color
+   - "mysql:" in white, status in color
 
-✅ 3. Stricter Bot Distribution Color Coding
-   - OLD: Green ±3%, Yellow ±3-6%, Red ±6-9%
-   - NEW: Green ±1%, Yellow ±2-3%, Red >3%
-   - Encourages tighter bot distribution management
-   - File: src/btop_draw.cpp:1889-1907
+2. Continent names now white
+   - "Eastern Kingdoms" in white, "25%" in green/yellow/red
+   - "Kalimdor" in white, "25%" in color
+   - Only percentages show health colors
 
-✅ 4. Aligned Level Bracket Percentages
-   - Fixed: Level brackets used 13-char width while others used 15
-   - Now: All categories (Factions, Continents, Levels) use 15-char width
-   - Result: Clean vertical alignment of all % symbols
-   - File: src/btop_draw.cpp:1909
+3. Level bracket names now white  
+   - "1-9" in white, "10%" in green/yellow/red
+   - "10-19" in white, "9%" in color
+   - Only percentages show distribution health
 
-✅ 5. Fixed Duplicate Eastern Kingdoms
-   - Issue: "Eastern Kingdoms" appeared twice (map 0 and map 609)
-   - Fix: Added subquery to aggregate by continent name AFTER mapping
-   - Result: Single "Eastern Kingdoms" entry with combined count
-   - File: src/btop_azerothcore.cpp:764-784
+VISUAL EXAMPLE:
 
+Before:
+  worldserver: Up 2 hours     (all green)
+  Eastern Kingdoms      25%   (all green/yellow/red)
+  1-9                   10%   (all green/yellow/red)
 
-BUILD STATUS:
-────────────────────────────────────────────────────────────────────────────────
-Binary:        bin/bottop (1.9 MB)
-Compiled:      December 16, 2025 at 16:16
-Build Time:    1 minute 28 seconds
-Warnings:      0 (in bottop-specific code)
-Status:        ✅ PRODUCTION READY
+After:
+  worldserver: Up 2 hours     (name white, status green)
+  Eastern Kingdoms      25%   (name white, % green/yellow/red)
+  1-9                   10%   (name white, % green/yellow/red)
 
+RATIONALE:
+- Matches "Status:" label style (white label, colored value)
+- Easier to read - labels are consistent, only values change color
+- Colors indicate health/status, not categories
+- More professional appearance
 
-VISUAL IMPROVEMENTS:
-────────────────────────────────────────────────────────────────────────────────
-
-Container Display (OFFLINE/RESTARTING):
-┌────────────────────────────────────┐
-│ Status: OFFLINE                    │
-│                                    │
-│   worldserver: exited         ⬅ ALL containers now shown
-│   authserver: running              │
-│   database: running                │
-│   db-import: exited                │
-│   client-data-init: exited         │
-│   bot-relocate: exited             │
-└────────────────────────────────────┘
-
-Bot Distribution (Stricter Colors):
-┌────────────────────────────────────┐
-│ Levels:                            │
-│   1-10              12%  (green)   │  ⬅ Within ±1%
-│   11-20             15%  (yellow)  │  ⬅ Within ±2-3%
-│   21-30             22%  (red)     │  ⬅ >3% off target
-└────────────────────────────────────┘
-
-Alignment Fix:
-┌────────────────────────────────────┐
-│ Factions:                          │
-│   Horde            52%             │  ⬅ 15 chars + %
-│   Alliance         48%             │
-│                                    │
-│ Continents:                        │
-│   Eastern Kingdoms 35%             │  ⬅ 15 chars + %
-│   Kalimdor         30%             │
-│                                    │
-│ Levels:                            │
-│   1-10             12%             │  ⬅ NOW 15 chars + % (aligned!)
-│   11-20            15%             │
-└────────────────────────────────────┘
-
-Continent Fix:
-┌────────────────────────────────────┐
-│ Continents:                        │
-│   Eastern Kingdoms 35%             │  ⬅ Single entry (was duplicate)
-│   Kalimdor         30%             │
-│   Outland          20%             │
-│   Northrend        15%             │
-└────────────────────────────────────┘
-
-
-TESTING:
-────────────────────────────────────────────────────────────────────────────────
-
-Test 1: Container Display
-  $ ssh root@server "docker stop testing-ac-worldserver"
-  $ ./bin/bottop
-  Expected: See ALL containers (6+), not just 3
-
-Test 2: Bot Distribution Colors
-  $ ./bin/bottop
-  Expected: Stricter color coding (±1% green, ±2-3% yellow, >3% red)
-
-Test 3: Alignment
-  $ ./bin/bottop
-  Expected: All % symbols align vertically in distribution pane
-
-Test 4: Eastern Kingdoms
-  $ ./bin/bottop
-  Expected: Only ONE "Eastern Kingdoms" entry in Continents
-
+FILES MODIFIED:
+- src/btop_draw.cpp (lines 1699, 1893, 1962)
+  - Line 1699: Container names use `title` color (white)
+  - Line 1893: Continent names use `title` color (white)
+  - Line 1962: Level bracket names use `title` color (white)
 
 TECHNICAL DETAILS:
-────────────────────────────────────────────────────────────────────────────────
+- Build time: 6 seconds
+- Binary size: 2.7 MiB
+- Binary location: /Users/havoc/bottop/bin/bottop
+- Timestamp: Dec 16 18:45
 
-Files Modified:
-  • src/btop_azerothcore.cpp  - Container filter, continent query
-  • src/btop_draw.cpp         - Color thresholds, alignment
+PREVIOUS CHANGES:
+- 18:38: Smart filtering of helper containers
+- 18:36: Container fetching for ONLINE state
+- 18:31: Display container.status instead of container.state
 
-Lines Changed:
-  • ~25 lines total
-  • 2 files modified
-
-Performance Impact:
-  • Container display: No change (same command, just shows more results)
-  • Continent query: +1ms (subquery overhead - negligible)
-  • Color coding: No change (same calculation, different thresholds)
-  • Alignment: No change (+2 chars per line - negligible)
-
-
-DOCUMENTATION:
-────────────────────────────────────────────────────────────────────────────────
-Created: UI_REFINEMENTS_SUMMARY.md (comprehensive guide)
-Updated: LATEST_CHANGES.txt (this file)
-
-
-QUICK START:
-────────────────────────────────────────────────────────────────────────────────
-1. Run bottop:
-   $ ./bin/bottop
-
-2. Stop worldserver to test container display:
-   $ ssh root@server "docker stop testing-ac-worldserver"
-   $ ./bin/bottop
-   (Should show all containers, not just 3)
-
-3. Check distribution colors and alignment:
-   - Look at Levels section
-   - Verify stricter color coding (more yellow/red if bots unbalanced)
-   - Verify % symbols align with Factions and Continents
-
-4. Verify no duplicate Eastern Kingdoms:
-   - Check Continents section
-   - Should only see ONE "Eastern Kingdoms" entry
-
-
-╔══════════════════════════════════════════════════════════════════════════════╗
-║                    ALL CHANGES COMPLETE AND TESTED                           ║
-║                         Ready for Production Use                             ║
-╚══════════════════════════════════════════════════════════════════════════════╝
+STATUS: Ready for testing - cleaner visual hierarchy! ✅

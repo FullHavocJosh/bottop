@@ -1612,6 +1612,8 @@ namespace Draw {
 				return out;
 			}
 			
+			//* Blank line at top
+			cy++;
 			
 		//* Server URL - extract just hostname
 		if (!data.server_url.empty()) {
@@ -1655,32 +1657,13 @@ namespace Draw {
 			out += Theme::c("inactive_fg") + "ERROR";
 		}
 		
-		//* Container statuses - show always underneath Status line
-		if (!data.containers.empty()) {
-			// No blank line - containers appear immediately after Status
+		//* Container statuses - show when not ONLINE
+		if (data.status != ServerStatus::ONLINE && !data.containers.empty()) {
+			// Blank line for spacing
+			cy++;
 			
-			// Determine if we should show helper containers (db-import, bot-relocate, client-data-init)
-			// Only show helpers if worldserver is NOT running normally
-			bool worldserver_healthy = false;
+			// Show each container status
 			for (const auto& container : data.containers) {
-				if (container.short_name == "worldserver" && container.is_running && 
-				    container.state == "running" && container.status.find("Up ") == 0) {
-					worldserver_healthy = true;
-					break;
-				}
-			}
-			
-			// Show each container status (with filtering)
-			for (const auto& container : data.containers) {
-				// Filter out helper containers when worldserver is healthy
-				if (worldserver_healthy) {
-					if (container.short_name == "db-import" || 
-					    container.short_name == "bot-relocate" || 
-					    container.short_name == "client-data-init") {
-						continue;  // Skip helper containers
-					}
-				}
-				
 				out += Mv::to(cy, perf_x + 2) + string(perf_width - 4, ' ');
 				
 				// Color based on state
@@ -1695,9 +1678,9 @@ namespace Draw {
 					state_color = "\x1b[91m";  // Red for exited/dead
 				}
 				
-				// Format: "  worldserver: Up 2 hours" with white container name
+				// Format: "  worldserver: running"
 				out += Mv::to(cy++, perf_x + 4) + title + container.short_name + ": " 
-					+ state_color + container.status;
+					+ state_color + container.state;
 			}
 		}
 		
@@ -1890,7 +1873,7 @@ namespace Draw {
 				}
 				
 				string percent_str = to_string((int)continent.percent) + "%";
-				out += Mv::to(dist_cy, dist_x + 2) + title + ljust(continent.name, 15);
+				out += Mv::to(dist_cy, dist_x + 2) + line_color + ljust(continent.name, 15);
 				out += line_color + rjust(percent_str, 4);
 				dist_cy++;
 			}
@@ -1959,7 +1942,7 @@ namespace Draw {
 		string bracket_str = ljust(bracket_name, 15);
 		string percent_str = to_string((int)percent) + "%";
 		
-		out += Mv::to(dist_cy, dist_x + 2) + title + bracket_str;
+		out += Mv::to(dist_cy, dist_x + 2) + line_color + bracket_str;
 		out += line_color + rjust(percent_str, 4);
 		dist_cy++;
 	}
