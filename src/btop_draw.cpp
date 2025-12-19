@@ -1573,16 +1573,27 @@ namespace Draw {
 				const auto& active = ::AzerothCore::active;
 				const auto& load_hist = ::AzerothCore::load_history;
 				
-				string out;
-				out.reserve(width * height);
-				
-				//* Redraw box outlines for all three panes
-				if (redraw or force_redraw) {
-					out += perf_box + dist_box + zones_box;
-					graphs.clear();
-					meters.clear();
-					redraw = false;
+			string out;
+			out.reserve(width * height);
+			
+			//* Redraw box outlines for all three panes
+			if (redraw or force_redraw) {
+				// Clear all pane interiors completely to prevent ghosting
+				for (int clear_y = perf_y + 1; clear_y < perf_y + perf_height - 1; clear_y++) {
+					out += Mv::to(clear_y, perf_x + 1) + string(perf_width - 2, ' ');
 				}
+				for (int clear_y = dist_y + 1; clear_y < dist_y + dist_height - 1; clear_y++) {
+					out += Mv::to(clear_y, dist_x + 1) + string(dist_width - 2, ' ');
+				}
+				for (int clear_y = zones_y + 1; clear_y < zones_y + zones_height - 1; clear_y++) {
+					out += Mv::to(clear_y, x + 1) + string(width - 2, ' ');
+				}
+				
+				out += perf_box + dist_box + zones_box;
+				graphs.clear();
+				meters.clear();
+				redraw = false;
+			}
 				
 				// Get theme colors
 				string main_fg = Theme::c("main_fg");

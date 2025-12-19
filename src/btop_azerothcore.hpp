@@ -593,6 +593,9 @@ namespace AzerothCore {
 	
 	//* Load expected values from server config file
 	void load_expected_values();
+	
+	//* Reset all stats and clear display data (called on disconnect/restart detection)
+	void reset_stats();
 
 	//* Initialize AzerothCore monitoring
 	void init();

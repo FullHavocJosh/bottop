@@ -225,62 +225,64 @@ namespace Input {
 				Menu::show(Menu::Menus::Main);
 				return;
 			}
-			// Disabled stock btop keybinds - only q, esc, and z are active
-			/*
-			else if (is_in(key, "f1", "?", help_key)) {
-				Menu::show(Menu::Menus::Help);
+		// Disabled stock btop keybinds - only q, esc, z, and ctrl_r are active
+		/*
+		else if (is_in(key, "f1", "?", help_key)) {
+			Menu::show(Menu::Menus::Help);
+			return;
+		}
+		else if (is_in(key, "f2", "o")) {
+			Menu::show(Menu::Menus::Options);
+			return;
+		}
+		else if (key.size() == 1 and isint(key)) {
+			auto intKey = std::atoi(key.data());
+		#ifdef GPU_SUPPORT
+			static const array<string, 10> boxes = {"gpu5", "cpu", "mem", "net", "proc", "gpu0", "gpu1", "gpu2", "gpu3", "gpu4"};
+			if ((intKey == 0 and Gpu::count < 5) or (intKey >= 5 and intKey - 4 > Gpu::count))
 				return;
-			}
-			else if (is_in(key, "f2", "o")) {
-				Menu::show(Menu::Menus::Options);
+		#else
+		static const array<string, 10> boxes = {"", "cpu", "mem", "net", "proc"};
+			if (intKey == 0 or intKey > 4)
 				return;
-			}
-			else if (key.size() == 1 and isint(key)) {
-				auto intKey = std::atoi(key.data());
-			#ifdef GPU_SUPPORT
-				static const array<string, 10> boxes = {"gpu5", "cpu", "mem", "net", "proc", "gpu0", "gpu1", "gpu2", "gpu3", "gpu4"};
-				if ((intKey == 0 and Gpu::count < 5) or (intKey >= 5 and intKey - 4 > Gpu::count))
-					return;
-			#else
-			static const array<string, 10> boxes = {"", "cpu", "mem", "net", "proc"};
-				if (intKey == 0 or intKey > 4)
-					return;
-			#endif
-				atomic_wait(Runner::active);
+		#endif
+			atomic_wait(Runner::active);
 
-				if (not Config::toggle_box(boxes.at(intKey))) {
-					Menu::show(Menu::Menus::SizeError);
-					return;
-				}
-				Config::current_preset = -1;
-				Draw::calcSizes();
-				Runner::run("all", false, true);
+			if (not Config::toggle_box(boxes.at(intKey))) {
+				Menu::show(Menu::Menus::SizeError);
 				return;
 			}
-			else if (is_in(key, "p", "P") and Config::preset_list.size() > 1) {
-				const auto old_preset = Config::current_preset;
-				if (key == "p") {
-					if (++Config::current_preset >= (int)Config::preset_list.size()) Config::current_preset = 0;
-				}
-				else {
-					if (--Config::current_preset < 0) Config::current_preset = Config::preset_list.size() - 1;
-				}
-				atomic_wait(Runner::active);
-				if (not Config::apply_preset(Config::preset_list.at(Config::current_preset))) {
-					Menu::show(Menu::Menus::SizeError);
-					Config::current_preset = old_preset;
-					return;
-				}
-				Draw::calcSizes();
-				Runner::run("all", false, true);
+			Config::current_preset = -1;
+			Draw::calcSizes();
+			Runner::run("all", false, true);
+			return;
+		}
+		else if (is_in(key, "p", "P") and Config::preset_list.size() > 1) {
+			const auto old_preset = Config::current_preset;
+			if (key == "p") {
+				if (++Config::current_preset >= (int)Config::preset_list.size()) Config::current_preset = 0;
+			}
+			else {
+				if (--Config::current_preset < 0) Config::current_preset = Config::preset_list.size() - 1;
+			}
+			atomic_wait(Runner::active);
+			if (not Config::apply_preset(Config::preset_list.at(Config::current_preset))) {
+				Menu::show(Menu::Menus::SizeError);
+				Config::current_preset = old_preset;
 				return;
-			} else if (is_in(key, "ctrl_r")) {
-				kill(getpid(), SIGUSR2);
-				return;
-			} else
-			*/
-			else
-				keep_going = true;
+			}
+			Draw::calcSizes();
+			Runner::run("all", false, true);
+			return;
+		} else
+		*/
+		//? Config reload with ctrl_r - kept active for bottop
+		if (is_in(key, "ctrl_r")) {
+			kill(getpid(), SIGUSR2);
+			return;
+		}
+		else
+			keep_going = true;
 
 			if (not keep_going) return;
 		}

@@ -23,7 +23,9 @@ tab-size = 4
 #include <netinet/in.h>
 #include <netdb.h>
 #include <unistd.h>
+#include <signal.h>
 #include <cstring>
+#include <cerrno>
 #include <sstream>
 #include <iomanip>
 #include <ctime>
@@ -57,6 +59,13 @@ namespace AzerothCore {
 	::AzerothCore::ServerPerformance last_known_perf;
 	uint64_t last_perf_update_time = 0;
 	const uint64_t PERF_UPDATE_INTERVAL_MS = 5000;  // Update every 5 seconds
+	
+	//* Track previous server status for disconnection detection
+	ServerStatus previous_status = ServerStatus::ONLINE;
+	
+	//* Config refresh tracking
+	uint64_t last_config_refresh_time = 0;
+	const uint64_t CONFIG_REFRESH_INTERVAL_MS = 90000;  // Refresh config every 90 seconds
 
 	//* LocalExecutor implementation
 	std::string LocalExecutor::execute(const std::string& command) {
@@ -104,9 +113,12 @@ namespace AzerothCore {
 		std::string user, hostname;
 		int port = 22;
 		
+		Logger::error("SSHClient::connect() called with host: " + host_);
+		
 		size_t at_pos = host_.find('@');
 		if (at_pos == std::string::npos) {
 			error_ = "Invalid host format. Expected: user@hostname[:port]";
+			Logger::error("SSHClient::connect() failed: no @ in host");
 			return false;
 		}
 		
@@ -121,19 +133,27 @@ namespace AzerothCore {
 			hostname = host_part;
 		}
 		
+		Logger::error("SSHClient::connect() parsed: user=" + user + " hostname=" + hostname + " port=" + std::to_string(port));
+		
 		// Resolve hostname
 		struct hostent* host_info = gethostbyname(hostname.c_str());
 		if (!host_info) {
 			error_ = "Could not resolve hostname: " + hostname;
+			Logger::error("SSHClient::connect() failed: gethostbyname() returned null");
 			return false;
 		}
+		
+		Logger::error("SSHClient::connect() resolved hostname successfully");
 		
 		// Create socket
 		sock_ = socket(AF_INET, SOCK_STREAM, 0);
 		if (sock_ == -1) {
-			error_ = "Failed to create socket";
+			error_ = "Failed to create socket: " + std::string(strerror(errno));
+			Logger::error("SSHClient::connect() failed: socket() returned -1, errno=" + std::to_string(errno));
 			return false;
 		}
+		
+		Logger::error("SSHClient::connect() created socket: " + std::to_string(sock_));
 		
 		// Connect to server
 		struct sockaddr_in sin;
@@ -141,12 +161,16 @@ namespace AzerothCore {
 		sin.sin_port = htons(port);
 		sin.sin_addr = *reinterpret_cast<struct in_addr*>(host_info->h_addr);
 		
+		Logger::error("SSHClient::connect() attempting socket connect...");
 		if (::connect(sock_, reinterpret_cast<struct sockaddr*>(&sin), sizeof(sin)) != 0) {
-			error_ = "Failed to connect to " + hostname + ":" + std::to_string(port);
+			error_ = "Failed to connect to " + hostname + ":" + std::to_string(port) + " - " + std::string(strerror(errno));
+			Logger::error("SSHClient::connect() failed: connect() returned error, errno=" + std::to_string(errno) + " msg=" + std::string(strerror(errno)));
 			close(sock_);
 			sock_ = -1;
 			return false;
 		}
+		
+		Logger::error("SSHClient::connect() socket connected successfully");
 		
 		// Create SSH session
 		session_ = libssh2_session_init();
@@ -1622,16 +1646,46 @@ namespace AzerothCore {
 		}
 	}
 	
+	void reset_stats() {
+		Logger::info("Resetting all stats and clearing display data");
+		
+		// Clear all data
+		current_data = ServerData();
+		current_data.server_url = config.use_local ? "localhost (Docker)" : config.ssh_host;
+		current_data.status = ServerStatus::OFFLINE;
+		current_data.error = "Server disconnected or restarted";
+		
+		// Clear historical data
+		load_history.clear();
+		
+		// Clear cached performance data
+		last_known_perf = ServerPerformance();
+		last_perf_update_time = 0;
+		
+		Logger::info("Stats reset complete");
+	}
+	
 	void collect() {
 		if (!enabled || !active || !query) return;
 		
 		Logger::error("COLLECT DEBUG: collect() called at " + std::to_string(std::time(nullptr)));
+		
+		// Get current time for config refresh check
+		auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::system_clock::now().time_since_epoch()
+		).count();
 		
 		try {
 			// First check if server is online
 			bool server_online = check_server_online();
 			
 			if (!server_online) {
+				// Detect transition from ONLINE to OFFLINE/RESTARTING
+				if (previous_status == ServerStatus::ONLINE) {
+					Logger::info("Server disconnected or went offline - resetting stats");
+					reset_stats();
+				}
+				
 				current_data.status = ServerStatus::OFFLINE;
 				current_data.consecutive_failures++;
 				
@@ -1649,6 +1703,9 @@ namespace AzerothCore {
 				current_data.stats.perf.available = false;
 				current_data.stats.perf.is_cached = false;
 				
+				// Update previous status
+				previous_status = current_data.status;
+				
 				return;
 			}
 			
@@ -1657,6 +1714,12 @@ namespace AzerothCore {
 		auto [is_rebuilding, rebuild_progress] = query->check_rebuild_status();
 		
 		if (is_rebuilding) {
+			// Detect transition from ONLINE to REBUILDING
+			if (previous_status == ServerStatus::ONLINE) {
+				Logger::info("Server started rebuilding - resetting stats");
+				reset_stats();
+			}
+			
 			current_data.status = ServerStatus::REBUILDING;
 			current_data.rebuild_progress = rebuild_progress;
 			current_data.error = "Server is rebuilding databases";
@@ -1668,9 +1731,31 @@ namespace AzerothCore {
 			current_data.stats.perf.available = false;
 			current_data.stats.perf.is_cached = false;
 			
+			// Update previous status
+			previous_status = current_data.status;
+			
 			Logger::error("COLLECT DEBUG: Server is rebuilding, progress=" + std::to_string(rebuild_progress) + "%");
 			return;
 		}
+		
+		// Detect transition from OFFLINE/RESTARTING/REBUILDING to ONLINE
+		if (previous_status != ServerStatus::ONLINE) {
+			Logger::info("Server came back online after being offline/restarting/rebuilding - resetting stats");
+			reset_stats();
+			// Force config refresh immediately after server restart
+			last_config_refresh_time = 0;
+		}
+		
+	// Periodic config refresh (every 90 seconds when server is online)
+	if (last_config_refresh_time == 0 || 
+	    (now_ms - last_config_refresh_time) >= CONFIG_REFRESH_INTERVAL_MS) {
+		Logger::info("Performing periodic config refresh (90s interval)");
+		load_expected_values();
+		last_config_refresh_time = now_ms;
+		
+		// Trigger bottop config reload via SIGUSR2 signal
+		kill(getpid(), SIGUSR2);
+	}
 		
 		// Server is online and not rebuilding, try to fetch data
 		Logger::error("COLLECT DEBUG: Server online, calling fetch_all()");
@@ -1690,6 +1775,9 @@ namespace AzerothCore {
 		current_data.status = ServerStatus::ONLINE;
 		current_data.rebuild_progress = 0.0;
 		current_data.consecutive_failures = 0;
+		
+		// Update previous status
+		previous_status = ServerStatus::ONLINE;
 			
 		// DEBUG: Verify assignment
 		std::ofstream collect_log("/tmp/bottop_collect.txt", std::ios::app);

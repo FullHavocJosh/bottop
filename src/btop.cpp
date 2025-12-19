@@ -1217,21 +1217,37 @@ static auto configure_tty_mode(std::optional<bool> force_tty) {
 				Theme::updateThemes();
 				Theme::setTheme();
 				Draw::banner_gen(0, 0, false, true);
+				// Clear overlay and screen completely to prevent ghosting
+				Global::overlay.clear();
+				Global::overlay.shrink_to_fit();
+				cout << Term::clear << flush;
 				Global::resized = true;
 			}
 
 			//? Make sure terminal size hasn't changed (in case of SIGWINCH not working properly)
 			term_resize(Global::resized);
 
-			//? Trigger secondary thread to redraw if terminal has been resized
-			if (Global::resized) {
-				Draw::calcSizes();
-				Draw::update_clock(true);
-				Global::resized = false;
-				if (Menu::active) Menu::process();
-				else Runner::run("all", true, true);
-				atomic_wait_for(Runner::active, true, 1000);
-			}
+		//? Trigger secondary thread to redraw if terminal has been resized
+		if (Global::resized) {
+			// Auto-reload config on resize to pick up any external changes
+			Config::unlock();
+			init_config(cli.low_color, cli.filter);
+			Theme::updateThemes();
+			Theme::setTheme();
+			Draw::banner_gen(0, 0, false, true);
+			
+			// Clear screen to prevent ghosting
+			Global::overlay.clear();
+			Global::overlay.shrink_to_fit();
+			cout << Term::clear << flush;
+			
+			Draw::calcSizes();
+			Draw::update_clock(true);
+			Global::resized = false;
+			if (Menu::active) Menu::process();
+			else Runner::run("all", true, true);
+			atomic_wait_for(Runner::active, true, 1000);
+		}
 
 			//? Update clock if needed
 			if (Draw::update_clock() and not Menu::active) {

@@ -1,0 +1,30 @@
+# Patch for playerbots.conf - Fix Level 1-4 Coverage
+# This updates starter zone brackets to cover levels 1-12 instead of 5-12
+
+# Apply this patch to /root/testing-azerothcore-wotlk/env/dist/etc/modules/playerbots.conf
+# Command: sed -i.bak 's/ZoneBracket\.\(1\|12\|14\|85\|141\|215\|3430\|3524\) = 5,12/ZoneBracket.\1 = 1,12/' playerbots.conf
+
+# Changes required:
+# OLD: AiPlayerbot.ZoneBracket.1 = 5,12
+# NEW: AiPlayerbot.ZoneBracket.1 = 1,12
+
+# OLD: AiPlayerbot.ZoneBracket.12 = 5,12
+# NEW: AiPlayerbot.ZoneBracket.12 = 1,12
+
+# OLD: AiPlayerbot.ZoneBracket.14 = 5,12
+# NEW: AiPlayerbot.ZoneBracket.14 = 1,12
+
+# OLD: AiPlayerbot.ZoneBracket.85 = 5,12
+# NEW: AiPlayerbot.ZoneBracket.85 = 1,12
+
+# OLD: AiPlayerbot.ZoneBracket.141 = 5,12
+# NEW: AiPlayerbot.ZoneBracket.141 = 1,12
+
+# OLD: AiPlayerbot.ZoneBracket.215 = 5,12
+# NEW: AiPlayerbot.ZoneBracket.215 = 1,12
+
+# OLD: AiPlayerbot.ZoneBracket.3430 = 5,12
+# NEW: AiPlayerbot.ZoneBracket.3430 = 1,12
+
+# OLD: AiPlayerbot.ZoneBracket.3524 = 5,12
+# NEW: AiPlayerbot.ZoneBracket.3524 = 1,12
