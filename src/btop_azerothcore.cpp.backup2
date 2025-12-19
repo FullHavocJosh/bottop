@@ -966,31 +966,34 @@ namespace AzerothCore {
 			z.actual_min = std::stoi(min_str);
 			z.actual_max = std::stoi(max_str);
 			
-			// Calculate proper alignment based on actual bot count within expected range
+			// Calculate alignment heuristic based on actual min/max vs expected range
+			// This is a fast approximation without needing per-zone queries
 			z.alignment = 0.0;
-			if (z.expected_min > 0 && z.expected_max > 0 && z.total > 0) {
-				// Query to count bots within the expected level range for this zone
-				std::string count_query = 
-					"SELECT COUNT(*) "
-					"FROM characters "
-					"WHERE online = 1 "
-					"  AND zone = " + zone_id_str + " "
-					"  AND level >= " + std::to_string(z.expected_min) + " "
-					"  AND level <= " + std::to_string(z.expected_max) + " "
-					"  AND " + get_excluded_accounts_filter() + ";";
-				
-				std::string count_result = mysql_exec(count_query);
-				if (!count_result.empty()) {
-					try {
-						int bots_in_range = std::stoi(count_result);
-						// Alignment percentage = (bots in correct range / total bots) * 100
-						z.alignment = (bots_in_range * 100.0) / z.total;
-					} catch (...) {
-						// Parse error, fall back to 0
+			if (z.expected_min > 0 && z.expected_max > 0) {
+				// If actual range is within expected range, assume perfect alignment
+				if (z.actual_min >= z.expected_min && z.actual_max <= z.expected_max) {
+					z.alignment = 100.0;
+				} 
+				// If ranges overlap, calculate based on overlap amount
+				else {
+					int overlap_min = std::max(z.actual_min, z.expected_min);
+					int overlap_max = std::min(z.actual_max, z.expected_max);
+					
+					if (overlap_max >= overlap_min) {
+						// There is some overlap
+						int overlap_range = overlap_max - overlap_min + 1;
+						int actual_range = z.actual_max - z.actual_min + 1;
+						
+						// Estimate: assume uniform distribution across actual range
+						// Alignment = (overlap_range / actual_range) * 100
+						z.alignment = (overlap_range * 100.0) / actual_range;
+						
+						// Cap at 100%
+						if (z.alignment > 100.0) z.alignment = 100.0;
+					} else {
+						// No overlap at all
 						z.alignment = 0.0;
 					}
-				} else {
-					z.alignment = 0.0;
 				}
 			} else {
 				// Unknown zones or zones without metadata

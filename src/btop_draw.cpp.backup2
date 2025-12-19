@@ -2224,21 +2224,9 @@ for (size_t sorted_idx = 0; sorted_idx < sorted_indices.size(); sorted_idx++) {
 					out += Mv::to(cy, x + 44) + (is_selected ? row_fg : Theme::c("inactive_fg")) + rjust(expected_range, 10);
 					out += Mv::to(cy, x + 57) + min_color + rjust(to_string(zone.actual_min), 3);
 					out += Mv::to(cy, x + 64) + max_color + rjust(to_string(zone.actual_max), 3);
-					// Color code based on deviation from 100% target
-					// Green: within 5% of target (95-100%)
-					// Yellow: 5-10% deviation (85-95%)  
-					// Red: 10%+ deviation (<85%)
-					string align_color;
-					double deviation = std::abs(100.0 - zone.alignment);
-					if (deviation <= 5.0) {
-						align_color = Theme::c("proc_misc");  // Green - within 5%
-					} else if (deviation <= 10.0) {
-						align_color = "\x1b[93m";  // Yellow - 5-10% off
-					} else {
-						align_color = Theme::c("title");  // Red - 10%+ off
-					}
-					
-					out += Mv::to(cy, x + 71) + align_color 
+					out += Mv::to(cy, x + 71) + (zone.alignment >= 80.0 ? Theme::c("proc_misc") 
+						: zone.alignment >= 60.0 ? row_fg 
+						: Theme::c("title")) 
 						+ rjust(to_string((int)zone.alignment), 3) + "%";
 					cy++;
 					displayed_rows++;

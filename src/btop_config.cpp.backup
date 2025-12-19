@@ -92,8 +92,7 @@ namespace Config {
 		{"shown_boxes", 		"#* Manually set which boxes to show. Available values are \"azerothcore cpu mem net proc\" and \"gpu0\" through \"gpu5\", separate values with whitespace.\n"
 								"#* Default is \"azerothcore\" to show only remote AzerothCore monitoring. Add \"cpu mem net proc\" to enable local system monitoring."},
 
-		{"update_ms", 			"#* Update time in milliseconds, recommended 2000 ms or above for better sample times for graphs.\n"
-							"#* Auto-configures to 1000ms (local) or 5000ms (SSH) if set to default (>=10000ms). Set custom value to override."},
+		{"update_ms", 			"#* Update time in milliseconds, recommended 2000 ms or above for better sample times for graphs."},
 
 		{"proc_sorting",		"#* Processes sorting, \"pid\" \"program\" \"arguments\" \"threads\" \"user\" \"memory\" \"cpu lazy\" \"cpu direct\",\n"
 								"#* \"cpu lazy\" sorts top process over time (easier to follow), \"cpu direct\" updates top process directly."},
@@ -665,32 +664,6 @@ namespace Config {
 		return true;
 	}
 
-	//* Detect if running over SSH connection
-	bool is_ssh_session() {
-		// Check SSH environment variables
-		return (std::getenv("SSH_CONNECTION") != nullptr || 
-		        std::getenv("SSH_CLIENT") != nullptr || 
-		        std::getenv("SSH_TTY") != nullptr);
-	}
-
-	//* Adjust update_ms based on connection type (SSH vs local)
-	void adjust_update_ms_for_connection() {
-		const int LOCAL_UPDATE_MS = 1000;    // 1 second for local (fast)
-		const int SSH_UPDATE_MS = 5000;      // 5 seconds for SSH (conservative)
-		
-		bool is_ssh = is_ssh_session();
-		int current_update_ms = ints.at("update_ms");
-		
-		// Only auto-adjust if using default value (30000ms) or if it seems unset
-		// This preserves user's custom settings
-		if (current_update_ms >= 10000) {  // If >= 10 seconds, assume it's default/unset
-			int new_update_ms = is_ssh ? SSH_UPDATE_MS : LOCAL_UPDATE_MS;
-			ints.at("update_ms") = new_update_ms;
-			string connection_type = is_ssh ? "SSH connection detected" : "local session detected";
-			Logger::info("Auto-configured update_ms to " + to_string(new_update_ms) + "ms (" + connection_type + ")");
-		}
-	}
-
 	void load_env_overrides() {
 		// Load sensitive settings from environment variables
 		// This allows keeping passwords out of config files
@@ -730,9 +703,6 @@ namespace Config {
 			write_new = true;
 			// Load environment variables even if config file doesn't exist
 			load_env_overrides();
-		
-		// Auto-adjust update_ms based on SSH vs local connection
-		adjust_update_ms_for_connection();
 			return;
 		}
 		if (error) {

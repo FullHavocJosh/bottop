@@ -1741,58 +1741,30 @@ namespace Draw {
 		}
 		
 	//* WorldServer Performance Metrics
-		if (data.stats.perf.available || data.stats.update_time_avg > 0) {
+		if (data.stats.perf.available) {
 			// Clear the line first to prevent ghosting
 			out += Mv::to(cy, perf_x + 2) + string(perf_width - 4, ' ');
 			
-			// Display actual server performance from "server info"
-			// Show current update time and mean (if available)
-			
-			// Helper function to get color based on ms value
-			auto get_perf_color = [](long long ms) -> string {
-				if (ms < 50) return Theme::c("proc_misc");  // Green - excellent
-				else if (ms < 100) return "\x1b[92m";      // Light green - good
-				else if (ms < 150) return "\x1b[93m";      // Yellow - acceptable
-				else return "\x1b[91m";                    // Red - poor
-			};
-			
-			// Build the display string
-			string perf_display = "WorldServer UpdateTime: ";
-			
-			// Priority 1: Show current value if available from server info
-			if (data.stats.perf.update_time_diff > 0) {
-				perf_display += get_perf_color(data.stats.perf.update_time_diff) 
-					+ to_string(data.stats.perf.update_time_diff) + "ms" 
-					+ Theme::c("graph_text");
-				
-				// Add mean as secondary info if different and available
-				if (data.stats.perf.mean > 0 && data.stats.perf.mean != data.stats.perf.update_time_diff) {
-					string metric_type = data.stats.perf.is_cached ? " [Cached Mean: " : " [Mean: ";
-					perf_display += metric_type + get_perf_color(data.stats.perf.mean) 
-						+ to_string(data.stats.perf.mean) + "ms" 
-						+ Theme::c("graph_text") + "]";
-				}
-			}
-			// Fallback to mean if current not available
-			else if (data.stats.perf.mean > 0) {
-				string metric_type = data.stats.perf.is_cached ? "[Cached Mean] " : "[Mean] ";
-				perf_display += get_perf_color(data.stats.perf.mean) 
-					+ to_string(data.stats.perf.mean) + "ms " 
-					+ Theme::c("graph_text") + metric_type;
-			}
-			// Priority 3: Fallback to deprecated update_time_avg (for backwards compatibility)
-			else if (data.stats.update_time_avg > 0) {
-				long long avg_ms = (long long)data.stats.update_time_avg;
-				perf_display += get_perf_color(avg_ms) 
-					+ to_string(avg_ms) + "ms " 
-					+ Theme::c("graph_text") + "[Query Time]";
-			}
-			// Show N/A if nothing available
-			else {
-				perf_display += Theme::c("inactive_fg") + "N/A";
+			// Display actual server performance from "server info" - consolidated single line
+			// Mean update time with color coding
+			string diff_color;
+			if (data.stats.perf.mean < 50) {
+				diff_color = Theme::c("proc_misc");  // Green - excellent
+			} else if (data.stats.perf.mean < 100) {
+				diff_color = "\x1b[92m";  // Light green - good
+			} else if (data.stats.perf.mean < 150) {
+				diff_color = "\x1b[93m";  // Yellow - acceptable
+			} else {
+				diff_color = "\x1b[91m";  // Red - poor
 			}
 			
-			out += Mv::to(cy++, perf_x + 2) + title + perf_display;
+			// Format: "WorldServer UpdateTime: XXms [Mean]" or "WorldServer UpdateTime: XXms [Cached Mean]"
+			// Pad [Mean] with spaces to match [Cached Mean] length to prevent overlap
+			string metric_type = data.stats.perf.is_cached ? "[Cached Mean]" : "[Mean]       ";
+			
+			out += Mv::to(cy++, perf_x + 2) + title + "WorldServer UpdateTime: " 
+				+ diff_color + to_string(data.stats.perf.mean) + "ms " 
+				+ Theme::c("graph_text") + metric_type;
 		}
 	
 	//* Response time bar graph area - display as vertical bars
@@ -2224,21 +2196,9 @@ for (size_t sorted_idx = 0; sorted_idx < sorted_indices.size(); sorted_idx++) {
 					out += Mv::to(cy, x + 44) + (is_selected ? row_fg : Theme::c("inactive_fg")) + rjust(expected_range, 10);
 					out += Mv::to(cy, x + 57) + min_color + rjust(to_string(zone.actual_min), 3);
 					out += Mv::to(cy, x + 64) + max_color + rjust(to_string(zone.actual_max), 3);
-					// Color code based on deviation from 100% target
-					// Green: within 5% of target (95-100%)
-					// Yellow: 5-10% deviation (85-95%)  
-					// Red: 10%+ deviation (<85%)
-					string align_color;
-					double deviation = std::abs(100.0 - zone.alignment);
-					if (deviation <= 5.0) {
-						align_color = Theme::c("proc_misc");  // Green - within 5%
-					} else if (deviation <= 10.0) {
-						align_color = "\x1b[93m";  // Yellow - 5-10% off
-					} else {
-						align_color = Theme::c("title");  // Red - 10%+ off
-					}
-					
-					out += Mv::to(cy, x + 71) + align_color 
+					out += Mv::to(cy, x + 71) + (zone.alignment >= 80.0 ? Theme::c("proc_misc") 
+						: zone.alignment >= 60.0 ? row_fg 
+						: Theme::c("title")) 
 						+ rjust(to_string((int)zone.alignment), 3) + "%";
 					cy++;
 					displayed_rows++;
