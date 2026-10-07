@@ -3,6 +3,7 @@
 ## Issues Fixed - December 11, 2025
 
 ### Problem 1: Crash When Opening Third Zone
+
 **Symptom:** bottop crashes when expanding the third zone.
 
 **Root Cause:** Missing bounds checking in zone expansion handler. When accessing `AzerothCore::current_data.zones[idx]`, if the index was out of bounds (due to data refresh timing or invalid state), it would cause an out-of-bounds access and crash.
@@ -12,6 +13,7 @@
 **File Modified:** `src/btop_input.cpp` (lines 310-335)
 
 **Changes Made:**
+
 ```cpp
 // BEFORE: No bounds check - could crash
 size_t idx = Draw::AzerothCore::selected_zone;
@@ -22,7 +24,7 @@ size_t idx = Draw::AzerothCore::selected_zone;
 
 // Bounds check to prevent crash
 if (idx >= AzerothCore::current_data.zones.size()) {
-    Logger::warning("Zone index out of bounds: " + std::to_string(idx) + 
+    Logger::warning("Zone index out of bounds: " + std::to_string(idx) +
                     " >= " + std::to_string(AzerothCore::current_data.zones.size()));
     return;
 }
@@ -31,7 +33,7 @@ if (idx >= AzerothCore::current_data.zones.size()) {
 auto& zone = AzerothCore::current_data.zones[idx];
 try {
     zone.details = AzerothCore::query->fetch_zone_details(zone.zone_id);
-    Logger::debug("Loaded " + std::to_string(zone.details.size()) + 
+    Logger::debug("Loaded " + std::to_string(zone.details.size()) +
                   " details for zone: " + zone.name);
 } catch (const std::exception& e) {
     Logger::error("Failed to fetch zone details: " + std::string(e.what()));
@@ -39,6 +41,7 @@ try {
 ```
 
 **Protection Added:**
+
 1. Bounds check before array access
 2. Try-catch around query execution
 3. Debug logging for successful loads
@@ -47,6 +50,7 @@ try {
 ---
 
 ### Problem 2: Subzones Show Nothing
+
 **Symptom:** Pressing Enter/Space on a zone shows dropdown arrow (▼) but no level breakdown appears below.
 
 **Root Cause:** MySQL warnings were being included in query results, potentially interfering with parsing. The command-line warning "Using a password on the command line interface can be insecure" was being mixed with the actual data.
@@ -56,6 +60,7 @@ try {
 **File Modified:** `src/btop_azerothcore.cpp` (line 289)
 
 **Change:**
+
 ```cpp
 // BEFORE: Warning messages mixed with data
 cmd << " -sN -e \"" << query << "\"";
@@ -69,6 +74,7 @@ cmd << " -sN -e \"" << query << "\" 2>/dev/null";
 **File Modified:** `src/btop_draw.cpp` (lines 1778-1793)
 
 **Change:**
+
 ```cpp
 // BEFORE: Shows nothing if details are empty
 if (is_expanded && !zone.details.empty()) {
@@ -94,23 +100,25 @@ if (is_expanded) {
 ## How Zone Details Work
 
 ### Query Execution Flow:
+
 1. User presses `Enter`/`Space` on a zone
 2. bottop fetches level breakdown for that zone:
-   ```sql
-   SELECT 
-     CASE 
-       WHEN level BETWEEN 1 AND 10 THEN '1-10'
-       ...
-     END as bracket,
-     COUNT(*) as count
-   FROM characters
-   WHERE online = 1 AND zone = <zone_id>
-   GROUP BY bracket;
-   ```
+    ```sql
+    SELECT
+      CASE
+        WHEN level BETWEEN 1 AND 10 THEN '1-10'
+        ...
+      END as bracket,
+      COUNT(*) as count
+    FROM characters
+    WHERE online = 1 AND zone = <zone_id>
+    GROUP BY bracket;
+    ```
 3. Results are parsed (tab-separated: `bracket\tcount`)
 4. Details are displayed below the expanded zone
 
 ### Expected Output:
+
 ```
 ▼ ● Durotar                         172      1     80   100%
     Lvl 1-10                         66           38%
@@ -128,6 +136,7 @@ if (is_expanded) {
 ## Testing
 
 ### Test Commands:
+
 ```bash
 cd /home/havoc/bottop
 
@@ -139,25 +148,27 @@ echo 'log_level = "DEBUG"' >> ~/.config/bottop/bottop.conf
 ```
 
 ### Test Procedure:
+
 1. **Test Selection:**
-   - Press `z` to enter zone navigation
-   - Look for `► ` arrow (should be very visible)
-   - Use `↑`/`↓` to navigate
+    - Press `z` to enter zone navigation
+    - Look for `► ` arrow (should be very visible)
+    - Use `↑`/`↓` to navigate
 
 2. **Test Expansion (No Crash):**
-   - Press `Enter` or `Space` on first zone
-   - Press `↓` to select second zone
-   - Press `Enter` or `Space` on second zone
-   - Press `↓` to select third zone
-   - Press `Enter` or `Space` on third zone ✅ Should NOT crash!
+    - Press `Enter` or `Space` on first zone
+    - Press `↓` to select second zone
+    - Press `Enter` or `Space` on second zone
+    - Press `↓` to select third zone
+    - Press `Enter` or `Space` on third zone ✅ Should NOT crash!
 
 3. **Test Subzone Display:**
-   - Expand any zone with multiple players
-   - Should see level breakdown below zone
-   - If no breakdown appears, check for "(No level details available)" message
-   - Check logs: `tail -f ~/.config/bottop/bottop.log`
+    - Expand any zone with multiple players
+    - Should see level breakdown below zone
+    - If no breakdown appears, check for "(No level details available)" message
+    - Check logs: `tail -f ~/.config/bottop/bottop.log`
 
 ### Expected Log Output (Success):
+
 ```
 [DEBUG] fetch_zone_details: Fetching details for zone_id=14
 [DEBUG] fetch_zone_details: Query result length=87
@@ -174,6 +185,7 @@ echo 'log_level = "DEBUG"' >> ~/.config/bottop/bottop.conf
 ```
 
 ### Expected Log Output (Empty Result):
+
 ```
 [DEBUG] fetch_zone_details: Fetching details for zone_id=999
 [DEBUG] fetch_zone_details: Query result length=0
@@ -192,24 +204,27 @@ If zone details are still empty after this fix, possible reasons:
 4. **Database connection issue** - Check if MySQL queries are actually executing
 
 **To Diagnose:**
+
 - Enable debug logging (`log_level = "DEBUG"`)
 - Expand a zone and check logs
 - Look for "Query result length=0" or "Empty result"
 - Manually test query on database (see below)
 
 **Manual Test:**
+
 ```bash
 ssh root@testing-azerothcore.rollet.family \
   "docker exec testing-ac-worldserver \
    mysql -htesting-ac-database -uroot -ppassword \
    -Dacore_characters -sN -e \
-   'SELECT CASE WHEN level BETWEEN 1 AND 10 THEN \"1-10\" END as bracket, COUNT(*) as count 
+   'SELECT CASE WHEN level BETWEEN 1 AND 10 THEN \"1-10\" END as bracket, COUNT(*) as count
     FROM characters WHERE online = 1 AND zone = 14 GROUP BY bracket;' 2>/dev/null"
 ```
 
 ---
 
 ## Build Status
+
 ✅ Clean build (0 warnings)
 ✅ Binary: 3.6MB
 ✅ Crash protection added
@@ -217,11 +232,13 @@ ssh root@testing-azerothcore.rollet.family \
 ✅ User-friendly empty state message
 
 ## Files Modified
+
 1. `src/btop_input.cpp` - Bounds checking + error handling (lines 310-335)
 2. `src/btop_azerothcore.cpp` - Suppress MySQL warnings (line 289)
 3. `src/btop_draw.cpp` - Show message when no details (lines 1778-1793)
 
 ## Summary
+
 - ✅ Crash fixed with bounds checking and try-catch
 - ✅ MySQL warnings no longer interfere with data parsing
 - ✅ User sees helpful message when zone details are empty

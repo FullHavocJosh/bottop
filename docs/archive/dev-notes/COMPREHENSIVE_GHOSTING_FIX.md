@@ -9,23 +9,26 @@ Applied comprehensive ghosting prevention across all UI elements in bottop by cl
 ### 1. Performance Pane (Left Side)
 
 #### Server URL (line 1619-1621)
+
 ```cpp
 // Clear the line first to prevent ghosting
 out += Mv::to(cy, perf_x + 2) + string(perf_width - 4, ' ');
 ```
 
 #### Server Status (line 1625-1636)
+
 ```cpp
 // Clear the entire line first to prevent ghosting
 out += Mv::to(cy, perf_x + 2) + string(perf_width - 4, ' ');
 out += Mv::to(cy++, perf_x + 2) + title + "Server Status: ";
 if (data.status == ServerStatus::ONLINE) {
-    out += Theme::c("proc_misc") + "ONLINE " + main_fg + "[" 
+    out += Theme::c("proc_misc") + "ONLINE " + main_fg + "["
         + ::AzerothCore::format_uptime(data.stats.uptime_hours) + "]";
 }
 ```
 
 #### Ollama Stats Section (line 1650-1653)
+
 ```cpp
 // Clear the Ollama section to prevent ghosting
 for (int clear_line = 0; clear_line < 5; clear_line++) {
@@ -34,12 +37,14 @@ for (int clear_line = 0; clear_line < 5; clear_line++) {
 ```
 
 #### WorldServer Performance Metrics (line 1672-1673)
+
 ```cpp
 // Clear the line first to prevent ghosting
 out += Mv::to(cy, perf_x + 2) + string(perf_width - 4, ' ');
 ```
 
 #### Response Time Graph Area (line 1704-1707)
+
 ```cpp
 // Clear the graph area to prevent ghosting
 for (int clear_line = 0; clear_line < graph_height; clear_line++) {
@@ -50,7 +55,9 @@ for (int clear_line = 0; clear_line < graph_height; clear_line++) {
 ### 2. Distribution Pane (Right Side)
 
 #### Entire Distribution Pane (line 1760-1763)
+
 Clears factions, continents, and level brackets sections all at once:
+
 ```cpp
 // Clear the entire distribution pane to prevent ghosting
 for (int clear_line = 0; clear_line < dist_height - 2; clear_line++) {
@@ -59,6 +66,7 @@ for (int clear_line = 0; clear_line < dist_height - 2; clear_line++) {
 ```
 
 This single clear operation handles:
+
 - **Factions**: Horde/Alliance distribution
 - **Continents**: Eastern Kingdoms, Kalimdor, etc.
 - **Levels**: All level brackets (1-10, 11-20, etc.)
@@ -66,6 +74,7 @@ This single clear operation handles:
 ### 3. Zones Pane (Bottom)
 
 #### Entire Zones Pane (line 1876-1880)
+
 ```cpp
 // Clear the entire zones pane to prevent ghosting
 for (int clear_line = 0; clear_line < zones_height - 2; clear_line++) {
@@ -75,18 +84,21 @@ cy = zones_y + 1;  // Reset cy after clearing
 ```
 
 This handles:
+
 - Zone list headers
 - Zone data rows
 - All zone statistics (bots, levels, alignment)
 - Navigation help text
 
 #### Bottom Navigation/Help Line (line 2107-2108)
+
 ```cpp
 // Navigation help (clear bottom line first to prevent ghosting)
 out += Mv::to(zones_y + zones_height - 1, x + 1) + string(width - 2, ' ');
 ```
 
 This clears:
+
 - Filter input box
 - Navigation help text
 - Timestamp display
@@ -94,12 +106,14 @@ This clears:
 ## Technical Approach
 
 ### Strategy
+
 1. **Clear-then-draw**: Always clear the area before writing new content
 2. **Full area clearing**: Clear entire sections rather than individual lines when possible
 3. **Coordinate-based**: Use `Mv::to()` with explicit coordinates for precise positioning
 4. **Width-aware**: Use pane widths minus borders for clearing (e.g., `width - 2`)
 
 ### Benefits
+
 - **No ghosting**: Old text is completely removed before new text is drawn
 - **Clean transitions**: Smooth visual updates when content changes
 - **Dynamic content safe**: Handles variable-length text properly
@@ -132,6 +146,7 @@ Binary: bin/bottop (1.9MiB)
 ## Before vs After
 
 ### Before
+
 - Text would overlap when content changed
 - Server status switching left artifacts
 - Graph area showed ghost lines
@@ -139,6 +154,7 @@ Binary: bin/bottop (1.9MiB)
 - Zone list had rendering artifacts
 
 ### After
+
 - All content areas are cleared before redrawing
 - Smooth, clean transitions between states
 - No visual artifacts or text overlap
