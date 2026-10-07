@@ -33,6 +33,7 @@ root@testing-azerothcore.rollet.family:
 ### Inside Docker Container
 
 The paths **inside your container** should be:
+
 ```
 /azerothcore/env/dist/etc/worldserver.conf
 /azerothcore/env/dist/etc/modules/mod_player_bot_level_brackets.conf
@@ -65,12 +66,14 @@ AiPlayerbot.MaxRandomBots = 500
 ```
 
 Used for:
+
 - Bot count validation
 - Expected bot range
 
 ### From `mod_player_bot_level_brackets.conf`
 
 #### Level Brackets
+
 ```ini
 BotLevelBrackets.Alliance.Range1.Lower = 1
 BotLevelBrackets.Alliance.Range1.Upper = 9
@@ -84,11 +87,13 @@ BotLevelBrackets.Alliance.Range2.Pct = 9.0
 ```
 
 Used for:
+
 - Level bracket definitions (1-9, 10-19, 60, 70, 80, etc.)
 - Expected percentage per bracket
 - Color coding (green/yellow/red based on deviation)
 
 #### Continent Percentages
+
 ```ini
 BotContinentPct.EasternKingdoms = 25.0
 BotContinentPct.Kalimdor = 25.0
@@ -97,22 +102,26 @@ BotContinentPct.Northrend = 25.0
 ```
 
 Used for:
+
 - Expected continent distribution
 - Color coding (green/yellow/red based on deviation)
 
 ## Verifying Config Paths
 
 ### Test SSH Access
+
 ```bash
 ssh root@testing-azerothcore.rollet.family "docker ps"
 ```
 
 ### Test Container Name
+
 ```bash
 ssh root@testing-azerothcore.rollet.family "docker ps --filter 'name=ac-' --format '{{.Names}}'"
 ```
 
 Expected output might be:
+
 ```
 testing-ac-worldserver
 testing-ac-authserver
@@ -120,6 +129,7 @@ testing-ac-mysql
 ```
 
 ### Test Config File Access
+
 ```bash
 # Test worldserver.conf
 ssh root@testing-azerothcore.rollet.family \
@@ -133,6 +143,7 @@ ssh root@testing-azerothcore.rollet.family \
 If these commands fail, the paths might be different inside your container.
 
 ### Find Actual Paths Inside Container
+
 ```bash
 # List files in container
 ssh root@testing-azerothcore.rollet.family \
@@ -147,6 +158,7 @@ ssh root@testing-azerothcore.rollet.family \
 If `azerothcore_config_path` is empty or files can't be read, bottop uses these defaults:
 
 ### Level Brackets (11 brackets)
+
 ```
 1-9     = 10%
 10-19   = 9%
@@ -162,6 +174,7 @@ If `azerothcore_config_path` is empty or files can't be read, bottop uses these 
 ```
 
 ### Continents
+
 ```
 No default percentages - will show grey (no health indication)
 ```
@@ -177,6 +190,7 @@ Once config is loaded, percentages are color-coded based on deviation:
 ### Example
 
 If config says `60 = 10%` and actual is:
+
 - `10%` → Green (0% deviation)
 - `11%` → Green (1% deviation)
 - `12%` → Yellow (2% deviation)
@@ -187,6 +201,7 @@ If config says `60 = 10%` and actual is:
 ### Config Not Loading
 
 Check bottop debug logs:
+
 ```bash
 tail -f /tmp/bottop_expected_values_debug.log
 tail -f /tmp/bottop_init_debug.log
@@ -195,39 +210,39 @@ tail -f /tmp/bottop_init_debug.log
 ### Common Issues
 
 1. **Wrong container name**
-   - Check: `docker ps --filter 'name=ac-'`
-   - Fix: Set correct `azerothcore_container` name
+    - Check: `docker ps --filter 'name=ac-'`
+    - Fix: Set correct `azerothcore_container` name
 
 2. **Wrong path inside container**
-   - Check: `docker exec <container> ls /azerothcore/env/dist/etc/`
-   - Fix: Use actual path from inside container
+    - Check: `docker exec <container> ls /azerothcore/env/dist/etc/`
+    - Fix: Use actual path from inside container
 
 3. **SSH authentication fails**
-   - Check: `ssh root@testing-azerothcore.rollet.family "echo test"`
-   - Fix: Set up SSH keys or password authentication
+    - Check: `ssh root@testing-azerothcore.rollet.family "echo test"`
+    - Fix: Set up SSH keys or password authentication
 
 4. **Docker permission denied**
-   - Check: `ssh user@host "docker ps"`
-   - Fix: Add SSH user to docker group or use root
+    - Check: `ssh user@host "docker ps"`
+    - Fix: Add SSH user to docker group or use root
 
 ## Testing Configuration
 
 After setting up config, restart bottop and check:
 
 1. **Level brackets display correctly**
-   - Should show your custom brackets (not defaults)
-   - Percentages should be colored based on your expected values
+    - Should show your custom brackets (not defaults)
+    - Percentages should be colored based on your expected values
 
 2. **Continent percentages colored**
-   - Should show green/yellow/red based on your config
-   - Grey means config wasn't loaded
+    - Should show green/yellow/red based on your config
+    - Grey means config wasn't loaded
 
 3. **Check logs**
-   ```bash
-   # Look for successful config load
-   grep "load_expected_values" /tmp/bottop_init_debug.log
-   grep "Loaded.*brackets" /tmp/bottop_expected_values_debug.log
-   ```
+    ```bash
+    # Look for successful config load
+    grep "load_expected_values" /tmp/bottop_init_debug.log
+    grep "Loaded.*brackets" /tmp/bottop_expected_values_debug.log
+    ```
 
 ## Environment Variables Alternative
 
